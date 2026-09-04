@@ -66,8 +66,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # 执行 pnpm --filter desktop tauri:build -> tauri build，
-      # 产物位于 apps/desktop/src-tauri/target/release/bundle/
+      # 执行 pnpm --filter desktop tauri:build -> tauri build。
+      # src-tauri 是仓库根 Cargo workspace 的成员，产物位于
+      # 仓库根目录的 target/release/bundle/
       # （Linux: deb/rpm/appimage；Windows: msi/nsis）。
       - name: Build Tauri app
         run: pnpm tauri:build
@@ -76,7 +77,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: apps/desktop/src-tauri/target/release/bundle/
+          path: target/release/bundle/
           if-no-files-found: error
 
   release:

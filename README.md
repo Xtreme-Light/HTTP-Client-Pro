@@ -138,7 +138,7 @@ pnpm dev          # 仅启动 Vite 开发服务器（http://localhost:5173）
 ```bash
 cd apps/desktop
 pnpm install
-pnpm tauri:build    # 输出到 src-tauri/target/release/bundle/
+pnpm tauri:build    # 输出到仓库根目录 target/release/bundle/（src-tauri 为 Cargo workspace 成员）
 ```
 
 ### 前端测试
