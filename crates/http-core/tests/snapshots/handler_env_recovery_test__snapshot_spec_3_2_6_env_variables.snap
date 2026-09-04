@@ -1,0 +1,21 @@
+---
+source: crates/http-core/tests/handler_env_recovery_test.rs
+expression: out
+---
+requests:
+  - line:
+      method: Get
+      target:
+        kind: absolute
+        value:
+          scheme: http
+          authority: "{{host}}"
+          path: /api/get
+          query: "id={{ element-id }}"
+          fragment: ~
+      http_version: ~
+    headers: []
+    body: ~
+    response_handler: ~
+    response_ref: ~
+diagnostics: []

@@ -1,0 +1,25 @@
+---
+source: crates/http-core/tests/handler_env_recovery_test.rs
+expression: out
+---
+requests:
+  - line:
+      method: Post
+      target:
+        kind: absolute
+        value:
+          scheme: http
+          authority: example.com
+          path: /api/add
+          query: ~
+          fragment: ~
+      http_version: ~
+    headers:
+      - name: Content-Type
+        value: application/json
+    body:
+      kind: inline
+      content: "{ \"name\": \"entity\", \"value\": \"content\" }"
+    response_handler: ~
+    response_ref: ~
+diagnostics: []

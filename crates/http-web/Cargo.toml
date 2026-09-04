@@ -1,0 +1,33 @@
+[package]
+name = "http-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "axum REST + SSE Web backend for HTTP Request in Editor format"
+
+[lib]
+name = "http_web"
+path = "src/lib.rs"
+
+[[bin]]
+name = "http-client-pro-web"
+path = "src/main.rs"
+
+[dependencies]
+http-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+reqwest = { workspace = true }
+async-stream = { workspace = true }
+tokio-stream = { workspace = true }
+futures-util = { workspace = true }
+
+[dev-dependencies]
+httpmock = { workspace = true }

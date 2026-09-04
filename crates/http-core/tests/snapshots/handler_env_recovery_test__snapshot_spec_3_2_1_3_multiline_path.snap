@@ -1,0 +1,21 @@
+---
+source: crates/http-core/tests/handler_env_recovery_test.rs
+expression: out
+---
+requests:
+  - line:
+      method: Get
+      target:
+        kind: absolute
+        value:
+          scheme: http
+          authority: example.com
+          path: /api/get
+          query: ~
+          fragment: ~
+      http_version: ~
+    headers: []
+    body: ~
+    response_handler: ~
+    response_ref: ~
+diagnostics: []

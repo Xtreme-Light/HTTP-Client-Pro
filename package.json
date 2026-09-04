@@ -1,0 +1,18 @@
+{
+  "name": "http-client-pro",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.27.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter desktop dev",
+    "build": "pnpm --filter desktop build",
+    "test": "cargo test --workspace && pnpm --filter desktop test",
+    "lint": "cargo clippy --workspace -- -D warnings",
+    "tauri:dev": "pnpm --filter desktop tauri:dev",
+    "tauri:build": "pnpm --filter desktop tauri:build"
+  }
+}

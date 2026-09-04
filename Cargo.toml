@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = ["crates/http-core", "crates/http-cli", "crates/http-web", "crates/http-mcp", "apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.88.0"
+
+[workspace.dependencies]
+http-core = { path = "crates/http-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+insta = { version = "1", features = ["yaml"] }
+percent-encoding = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart"] }
+httpmock = { version = "0.7", default-features = false }
+http = "1"
+rquickjs = { version = "0.12", features = ["bindgen", "macro", "loader"] }
+axum = { version = "0.8", features = ["json", "query"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "compression-gzip", "trace"] }
+async-stream = "0.3"
+tokio-stream = "0.1"
+futures-util = "0.3"
+tempfile = "3"
+rmcp = { version = "3", features = ["server", "transport-io"] }
+schemars = "1"

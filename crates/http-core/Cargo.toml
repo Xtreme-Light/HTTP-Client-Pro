@@ -1,0 +1,32 @@
+[package]
+name = "http-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "HTTP Request in Editor format core: lexer, parser, executor, response handler"
+
+[lib]
+name = "http_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+percent-encoding = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+rquickjs = { workspace = true, optional = true }
+
+[features]
+default = ["js-handler"]
+# ES5.1 response handler script engine (spec 4.5). Pulls in QuickJS via
+# rquickjs. Disable to ship a parser-only build (e.g. for MCP read-only mode).
+js-handler = ["dep:rquickjs"]
+
+[dev-dependencies]
+insta = { workspace = true }
+httpmock = { workspace = true }
+tokio = { workspace = true }

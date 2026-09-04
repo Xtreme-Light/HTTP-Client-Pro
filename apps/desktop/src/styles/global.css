@@ -1,0 +1,137 @@
+/* Global base styles — 主题由 CSS 变量驱动，默认值为暗色主题（与 lib/themes.ts darkBase 一致） */
+
+:root {
+  /* 背景层级 */
+  --bg-base: #1e1e1e;
+  --bg-panel: #252526;
+  --bg-chrome: #2d2d2d;
+  --bg-hover: #2a2d2e;
+  --bg-active: #37373d;
+  --bg-input: #2d2d2d;
+  --bg-input-deep: #1a1a1a;
+  --bg-button: #3c3c3c;
+  --bg-button-hover: #4c4c4c;
+
+  /* 边框 */
+  --border: #1a1a1a;
+  --border-strong: #3c3c3c;
+  --border-block: #333333;
+
+  /* 前景文字 */
+  --fg: #d4d4d4;
+  --fg-secondary: #cccccc;
+  --fg-muted: #858585;
+  --fg-strong: #ffffff;
+
+  /* 强调与焦点 */
+  --accent: #4ec9b0;
+  --accent-soft: rgba(78, 201, 176, 0.15);
+  --focus: #007acc;
+  --focus-bg: #094771;
+  --focus-ring: rgba(3, 102, 214, 0.25);
+
+  /* 语义色 */
+  --success: #2ea043;
+  --success-hover: #3fb950;
+  --success-fg: #ffffff;
+  --danger: #f48771;
+  --danger-strong: #e81123;
+  --danger-bg: #3c2a2a;
+  --danger-border: #5a3a3a;
+  --warning: #e2c08d;
+
+  /* 滚动条与分割条 */
+  --scrollbar: #424242;
+  --scrollbar-hover: #4f4f4f;
+  --splitter: #2b2b2b;
+  --splitter-hover: #3b3b3b;
+  --shadow: rgba(0, 0, 0, 0.4);
+  --overlay: rgba(0, 0, 0, 0.5);
+
+  /* 状态徽标 */
+  --chip-safe-bg: #1b3a1f;
+  --chip-safe-fg: #6dba6d;
+  --chip-write-bg: #1b2a3a;
+  --chip-write-fg: #6db4f0;
+  --chip-danger-bg: #3a1b1b;
+  --chip-danger-fg: #f48771;
+  --chip-warn-bg: #3a2a1b;
+  --chip-warn-fg: #e0c060;
+  --chip-neutral-bg: #2d2d2d;
+  --chip-neutral-fg: #858585;
+
+  /* UI 中复用的语法色 */
+  --syn-keyword: #c586c0;
+  --syn-url: #9cdcfe;
+  --syn-string: #ce9178;
+  --syn-comment: #6a9955;
+  --syn-number: #b5cea8;
+  --syn-bool: #569cd6;
+  --syn-tag: #569cd6;
+  --syn-attr: #9cdcfe;
+
+  /* UI 字体栈（由设置写入） */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+  color-scheme: dark;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg-base);
+}
+
+#app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
+
+/* 编辑器 gutter 执行状态转圈动画 */
+@keyframes cm-run-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Splitpanes overrides */
+.splitpanes__splitter {
+  background-color: var(--splitter) !important;
+  position: relative;
+}
+.splitpanes__splitter:hover {
+  background-color: var(--splitter-hover) !important;
+}
+.splitpanes--vertical > .splitpanes__splitter {
+  width: 4px !important;
+  min-width: 4px !important;
+}
+.splitpanes--horizontal > .splitpanes__splitter {
+  height: 4px !important;
+  min-height: 4px !important;
+}
+.splitpanes__pane {
+  background: var(--bg-base) !important;
+}

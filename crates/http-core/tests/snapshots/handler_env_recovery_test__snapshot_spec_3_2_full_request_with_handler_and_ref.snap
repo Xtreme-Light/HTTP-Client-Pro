@@ -1,0 +1,27 @@
+---
+source: crates/http-core/tests/handler_env_recovery_test.rs
+expression: out
+---
+requests:
+  - line:
+      method: Post
+      target:
+        kind: absolute
+        value:
+          scheme: http
+          authority: example.com
+          path: /auth
+          query: ~
+          fragment: ~
+      http_version: ~
+    headers:
+      - name: Content-Type
+        value: application/json
+    body:
+      kind: file_ref
+      path: input.json
+    response_handler:
+      kind: inline
+      script: "client.global.set(\"auth\", response.body.token);"
+    response_ref: previous-response.200.json
+diagnostics: []
