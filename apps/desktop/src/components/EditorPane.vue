@@ -280,6 +280,14 @@ watch(
   },
 );
 
+// 编辑器字体变更（--font-editor 由 settings store 写入）→ 重新测量文本几何
+watch(
+  () => settings.editorFontFamily,
+  () => {
+    view?.requestMeasure();
+  },
+);
+
 // 快捷键方案变更 → 重配置应用级绑定
 watch(
   () => settings.keymapScheme,

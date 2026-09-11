@@ -259,6 +259,7 @@ function bindingParts(binding: string): string[] {
                   placeholder="自定义字体名称，如 Inter"
                 />
               </div>
+              <p class="field-hint">同时作用于界面、Editor 与 Console；「跟随系统默认」时 Editor/Console 使用内置等宽字体。</p>
             </div>
 
             <div class="field col-6">

@@ -6,9 +6,12 @@ import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import type { EditorScheme } from '../themes';
 
-/** 编辑器字体栈（保持等宽，不随 UI 字体设置变化） */
-export const EDITOR_FONT_FAMILY =
-  '"Maple Mono", "Maple Mono NF", ui-monospace, SFMono-Regular, Menlo, monospace';
+/**
+ * 编辑器字体 — 读取全局 `--font-editor` CSS 变量。
+ * 该变量由设置页的字体选项驱动（见 stores/settings.ts applyDom），
+ * 默认等宽栈定义在 styles/global.css 与 lib/fonts.ts。
+ */
+const EDITOR_FONT_FAMILY = 'var(--font-editor)';
 
 /** 统一行高 — 行号 gutter 与编辑区内容共用，保证每行等高且左右垂直居中对齐 */
 export const EDITOR_LINE_HEIGHT = '1.6';

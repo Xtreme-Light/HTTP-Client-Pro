@@ -253,7 +253,7 @@ const requestText = computed(() => item.value?.source ?? '');
   padding: 8px;
   overflow: auto;
   font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-editor);
   white-space: pre-wrap;
   margin: 0;
   min-height: 100%;

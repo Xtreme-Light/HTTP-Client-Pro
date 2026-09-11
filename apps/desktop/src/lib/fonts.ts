@@ -41,6 +41,10 @@ export const SYSTEM_FONTS: SystemFontDef[] = [
 export const DEFAULT_UI_FONT_STACK =
   "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
 
+/** 未自定义字体时的默认编辑器/等宽字体栈 */
+export const DEFAULT_EDITOR_FONT_STACK =
+  '"Maple Mono", "Maple Mono NF", ui-monospace, SFMono-Regular, Menlo, monospace';
+
 const TEST_TEXT = 'mmmmmmmmmmlliWWI-0123456789';
 const TEST_FONT_SIZE = '72px';
 const BASELINE_FONTS = ['monospace', 'sans-serif', 'serif'];
@@ -106,15 +110,30 @@ export function isFontAvailable(font: string): boolean {
 }
 
 /**
- * 构建 UI 字体栈：主字体 + fallback 列表，末尾保证有通用族兜底。
- * 两者均为空时返回默认字体栈。
+ * 构建字体栈：主字体 + fallback 列表，末尾保证有通用族兜底。
+ * 两者均为空时返回 defaultStack。
  */
-export function buildUiFontStack(primary: string, fallback: string): string {
+function buildFontStack(
+  primary: string,
+  fallback: string,
+  defaultStack: string,
+  tailFamily: string,
+): string {
   const names = [...splitFontList(primary), ...splitFontList(fallback)];
   const parts = names.map((n) => (GENERIC_FAMILIES.has(n) ? n : quoteCssFont(n))).filter(Boolean);
-  if (parts.length === 0) return DEFAULT_UI_FONT_STACK;
+  if (parts.length === 0) return defaultStack;
   if (!GENERIC_FAMILIES.has(parts[parts.length - 1])) {
-    parts.push('sans-serif');
+    parts.push(tailFamily);
   }
   return parts.join(', ');
+}
+
+/** 构建 UI 字体栈（空则回退到默认无衬线栈） */
+export function buildUiFontStack(primary: string, fallback: string): string {
+  return buildFontStack(primary, fallback, DEFAULT_UI_FONT_STACK, 'sans-serif');
+}
+
+/** 构建编辑器/Console 字体栈（空则回退到内置等宽栈） */
+export function buildEditorFontStack(primary: string, fallback: string): string {
+  return buildFontStack(primary, fallback, DEFAULT_EDITOR_FONT_STACK, 'monospace');
 }

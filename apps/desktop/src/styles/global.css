@@ -73,6 +73,9 @@
   /* UI 字体栈（由设置写入） */
   --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 
+  /* 编辑器 / Console 字体栈（由设置写入，默认内置等宽栈） */
+  --font-editor: 'Maple Mono', 'Maple Mono NF', ui-monospace, SFMono-Regular, Menlo, monospace;
+
   color-scheme: dark;
 }
 

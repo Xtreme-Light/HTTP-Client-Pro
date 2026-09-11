@@ -12,7 +12,7 @@ import {
   type UiTheme,
 } from '../lib/themes';
 import { DEFAULT_KEYMAP_SCHEME, KEYMAPS, type KeymapSchemeId } from '../lib/keymaps';
-import { buildUiFontStack } from '../lib/fonts';
+import { buildEditorFontStack, buildUiFontStack } from '../lib/fonts';
 
 const STORAGE_KEY = 'http-client-pro:settings';
 
@@ -48,12 +48,16 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const uiFontFamily = computed(() => buildUiFontStack(uiFont.value, uiFontFallback.value));
 
+  /** 编辑器 / Console 字体栈（与界面字体同源；留空时使用内置等宽栈） */
+  const editorFontFamily = computed(() => buildEditorFontStack(uiFont.value, uiFontFallback.value));
+
   /** 将当前设置应用到 DOM（CSS 变量、字体、color-scheme） */
   function applyDom() {
     if (typeof document === 'undefined') return;
     applyThemeVars(theme.value.vars);
     const root = document.documentElement;
     root.style.setProperty('--font-ui', uiFontFamily.value);
+    root.style.setProperty('--font-editor', editorFontFamily.value);
     root.style.setProperty('color-scheme', theme.value.base);
   }
 
@@ -127,6 +131,7 @@ export const useSettingsStore = defineStore('settings', () => {
     theme,
     resolvedEditorScheme,
     uiFontFamily,
+    editorFontFamily,
     applyDom,
     load,
     persist,
