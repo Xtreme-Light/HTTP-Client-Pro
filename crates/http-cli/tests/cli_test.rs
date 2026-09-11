@@ -34,6 +34,9 @@ fn make_request(name: Option<&str>, method: Method, target: &str) -> Request {
         body: None,
         response_handler: None,
         response_ref: None,
+        pre_request_script: None,
+        output_redirect: None,
+        tags: Vec::new(),
         name: name.map(str::to_string),
     }
 }
@@ -162,7 +165,7 @@ fn load_env_loads_named_environment_from_default_path() {
     )
     .unwrap();
     let env = load_env(Some("staging"), None, tmp.path()).expect("loaded");
-    assert_eq!(env.get("host"), Some("staging.example.com"));
+    assert_eq!(env.get("host").as_deref(), Some("staging.example.com"));
 }
 
 #[test]
@@ -171,7 +174,7 @@ fn load_env_explicit_path_overrides_default() {
     let custom = tmp.path().join("custom.env.json");
     std::fs::write(&custom, r#"{ "dev": { "token": "abc" } }"#).unwrap();
     let env = load_env(Some("dev"), Some(&custom), tmp.path()).expect("loaded");
-    assert_eq!(env.get("token"), Some("abc"));
+    assert_eq!(env.get("token").as_deref(), Some("abc"));
 }
 
 #[test]
@@ -290,6 +293,75 @@ async fn run_with_env_substitutes_variables() {
     let code = cli.run().await;
     assert!(code_eq_success(code));
     m.assert_hits(1);
+}
+
+#[tokio::test]
+async fn run_executes_every_request_in_the_file_by_default() {
+    let upstream = MockServer::start();
+    let first = upstream.mock(|when, then| {
+        when.method(httpmock::Method::GET).path("/one");
+        then.status(200).body("1");
+    });
+    let second = upstream.mock(|when, then| {
+        when.method(httpmock::Method::GET).path("/two");
+        then.status(200).body("2");
+    });
+
+    let tmp = TempDir::new().unwrap();
+    let http_file = tmp.path().join("two.http");
+    std::fs::write(
+        &http_file,
+        format!(
+            "GET {}\n\n###\nGET {}\n",
+            upstream.url("/one"),
+            upstream.url("/two")
+        ),
+    )
+    .unwrap();
+
+    // `--json` only changes the report printer; both requests must still run.
+    let args = vec![
+        "http-client-pro".to_string(),
+        "run".to_string(),
+        http_file.to_string_lossy().to_string(),
+        "--json".to_string(),
+    ];
+    let cli = parse_args(args).expect("parse");
+    assert!(code_eq_success(cli.run().await));
+    first.assert_hits(1);
+    second.assert_hits(1);
+}
+
+#[tokio::test]
+async fn run_exits_non_zero_when_a_client_test_fails() {
+    let upstream = MockServer::start();
+    upstream.mock(|when, then| {
+        when.method(httpmock::Method::GET).path("/boom");
+        then.status(500).body("nope");
+    });
+
+    let tmp = TempDir::new().unwrap();
+    let http_file = tmp.path().join("boom.http");
+    std::fs::write(
+        &http_file,
+        format!(
+            "GET {}\n\n> {{% client.test(\"status is 200\", function() {{ \
+             client.assert(response.status === 200, \"not 200\"); }}); %}}\n",
+            upstream.url("/boom")
+        ),
+    )
+    .unwrap();
+
+    let args = vec![
+        "http-client-pro".to_string(),
+        "run".to_string(),
+        http_file.to_string_lossy().to_string(),
+    ];
+    let cli = parse_args(args).expect("parse");
+    assert!(
+        !code_eq_success(cli.run().await),
+        "a failed client.test must surface as exit code 1"
+    );
 }
 
 fn code_eq_success(c: std::process::ExitCode) -> bool {

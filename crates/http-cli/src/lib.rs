@@ -1,18 +1,22 @@
 //! `http-cli` — thin command-line wrapper around `http-core`.
 //!
 //! Subcommands:
-//! - `run <file.http>` — execute the first (or named) request in a `.http`
-//!   file and print the captured response.
+//! - `run <file.http>` — execute every request in a `.http` file (pre-request
+//!   scripts, JSONPath loops, dispatch, response handlers, `>>`/`<>` writes)
+//!   and print a per-request test summary.
 //!
-//! Flags (Phase 5 P5-2):
-//! - `--request <name>` — execute the request whose `### name` separator
+//! Flags (Phase 5 P5-2 / Phase 7 §7.8):
+//! - `--request <name>` — run only the request whose `### name` separator
 //!   matches. Falls back to position (1-based) if `name` is numeric.
 //! - `--env <name>` — select a named environment from
 //!   `http-client.env.json` in the working directory (JetBrains format).
 //! - `--env-file <path>` — override the env file location.
-//! - `--json` — print the result as JSON (default is human-readable).
+//! - `--json` — print the `FileReport` as JSON (default is human-readable).
 //! - `--cwd <path>` — base directory for `< file` references and response
 //!   refs (`<>`); defaults to the .http file's parent dir.
+//!
+//! Exit code is `1` when any `client.test` assertion fails, `2` for usage
+//! errors, `0` otherwise.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -20,7 +24,6 @@ use std::process::ExitCode;
 use http_core::dispatch::Dispatcher;
 use http_core::env::Environment;
 use http_core::parser::parse_file;
-use serde::Deserialize;
 
 /// Errors surfaced to the user via the CLI's exit code / stderr.
 #[derive(Debug, thiserror::Error)]
@@ -131,7 +134,7 @@ impl Cli {
     pub async fn run(self) -> ExitCode {
         match self.subcommand {
             Subcommand::Run(args) => match run_request(args).await {
-                Ok(()) => ExitCode::SUCCESS,
+                Ok(code) => code,
                 Err(e) => {
                     eprintln!("{e}");
                     ExitCode::from(e.exit_code())
@@ -141,7 +144,7 @@ impl Cli {
     }
 }
 
-async fn run_request(args: RunArgs) -> Result<(), CliError> {
+async fn run_request(args: RunArgs) -> Result<ExitCode, CliError> {
     let src = std::fs::read_to_string(&args.file)
         .map_err(|e| CliError::Read(args.file.clone(), e.to_string()))?;
     let file = parse_file(&src).map_err(|e| CliError::Parse(e.to_string()))?;
@@ -150,7 +153,6 @@ async fn run_request(args: RunArgs) -> Result<(), CliError> {
             eprintln!("warning: {} at {}", d.message, d.span);
         }
     }
-    let req = select_request(&file.requests, args.request.as_deref())?;
     let cwd = args
         .cwd
         .clone()
@@ -158,16 +160,25 @@ async fn run_request(args: RunArgs) -> Result<(), CliError> {
         .unwrap_or_else(|| PathBuf::from("."));
     let env = load_env(args.env.as_deref(), args.env_file.as_deref(), &cwd)?;
     let dispatcher = Dispatcher::new();
-    let res = dispatcher
-        .send(req, &env, Some(&cwd))
-        .await
-        .map_err(|e| CliError::Dispatch(e.to_string()))?;
+    let report = http_core::runner::run_parsed(
+        &file,
+        env,
+        &cwd,
+        args.request.as_deref(),
+        &dispatcher,
+    )
+    .await
+    .map_err(|e| CliError::Dispatch(e.to_string()))?;
     if args.json {
-        print_json(&res);
+        print_report_json(&report);
     } else {
-        print_human(&res);
+        print_report_human(&report);
     }
-    Ok(())
+    Ok(if report.ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
 /// Select the request to run. `selection`:
@@ -196,63 +207,51 @@ pub fn select_request<'a>(
     }
 }
 
-/// JetBrains HTTP Client env file: `{ "env_name": { "var": "value" } }`.
-#[derive(Debug, Deserialize, Default)]
-#[serde(default)]
-struct EnvFile {
-    #[serde(flatten)]
-    envs: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
-}
-
 pub fn load_env(
     env_name: Option<&str>,
     env_file: Option<&Path>,
     cwd: &Path,
 ) -> Result<Environment, CliError> {
-    let Some(name) = env_name else {
-        return Ok(Environment::new());
-    };
-    let path = env_file
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| cwd.join("http-client.env.json"));
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| CliError::EnvFile(path.clone(), e.to_string()))?;
-    let parsed: EnvFile =
-        serde_json::from_str(&text).map_err(|e| CliError::EnvFile(path.clone(), e.to_string()))?;
-    let vars = parsed
-        .envs
-        .get(name)
-        .ok_or_else(|| CliError::EnvNotFound(name.to_string(), path.clone()))?;
-    let mut env = Environment::new();
-    for (k, v) in vars {
-        env.set(k, v);
-    }
-    Ok(env)
+    http_core::env::load_env_files(env_name, env_file, cwd).map_err(|e| match e {
+        http_core::env::EnvLoadError::Io { path, reason }
+        | http_core::env::EnvLoadError::Parse { path, reason } => CliError::EnvFile(path, reason),
+        http_core::env::EnvLoadError::NotFound { name, path } => CliError::EnvNotFound(name, path),
+    })
 }
 
-fn print_json(res: &http_core::dispatch::DispatchResponse) {
-    let mut headers = serde_json::Map::new();
-    for (n, v) in &res.headers {
-        headers.insert(n.clone(), serde_json::Value::from(v.clone()));
-    }
-    let body = String::from_utf8_lossy(&res.body).into_owned();
-    let out = serde_json::json!({
-        "status": res.status,
-        "headers": headers,
-        "body": body,
-        "elapsed_ms": res.elapsed.as_millis() as u64,
-        "url": res.url,
-    });
-    println!("{}", serde_json::to_string_pretty(&out).unwrap());
+fn print_report_json(report: &http_core::runner::FileReport) {
+    println!("{}", serde_json::to_string_pretty(report).unwrap());
 }
 
-fn print_human(res: &http_core::dispatch::DispatchResponse) {
-    println!("{} {}", res.status, res.url);
-    println!("elapsed: {} ms", res.elapsed.as_millis());
-    println!();
-    for (n, v) in &res.headers {
-        println!("{n}: {v}");
+fn print_report_human(report: &http_core::runner::FileReport) {
+    for req in &report.requests {
+        let title = req.name.clone().unwrap_or_else(|| "(unnamed)".to_string());
+        println!("### {title}");
+        for it in &req.iterations {
+            println!(
+                "  [{}] {} {} ({} ms)",
+                it.index, it.status, it.url, it.elapsed_ms
+            );
+            for t in &it.tests {
+                let mark = if t.passed { "✓" } else { "✗" };
+                println!("    {mark} {}", t.name);
+                if !t.passed {
+                    if let Some(m) = &t.message {
+                        println!("      {m}");
+                    }
+                }
+            }
+            for d in &it.diagnostics {
+                println!("    ! {}", d.message);
+            }
+        }
     }
     println!();
-    println!("{}", String::from_utf8_lossy(&res.body));
+    println!(
+        "tests: {} passed, {} failed",
+        report.tests_passed, report.tests_failed
+    );
+    for l in &report.logs {
+        println!("log: {l}");
+    }
 }

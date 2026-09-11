@@ -269,14 +269,216 @@ MCP 权限分层（同 dbx）：`read_only`（仅解析展示）/ `safe_write`�
 - i18n 中/英
 - 性能基准（大 `.http` 文件、大响应体）
 
+### Phase 7 — JetBrains 官方 example 全兼容
+
+目标：`example/` 下四个官方示例（`GET.http`、`POST.http`、`RequestWithLoop.http`、`RequestWithScripts.http`）中的**每一个请求都能在本工具中解析、执行并通过其内嵌断言**。
+
+依据：[spec.md](./spec.md) + JetBrains 2026.1 *HTTP Client in product code editor* 官方文档。
+
+#### 7.0 差距分析（audit 结论）
+
+对 `http-core` 逐特性审计后的缺口清单：
+
+| # | 特性 | 出处 | 现状 | 缺口位置 |
+|---|---|---|---|---|
+| G1 | `//` 行注释（`//TIP ...`） | GET.http:14,41,47 / POST.http:18 | lexer 只识别 `#`，`//` 被当正文 | `lexer.rs` |
+| G2 | doc tags `@no-redirect` / `@no-cookie-jar` / `@no-auto-encoding` | GET.http:20,24,28 | 注释行被 parser 直接丢弃 | `parser.rs:52-54`、`model.rs` |
+| G3 | 裸 `HTTP/2` 版本号 | GET.http:51 | `is_http_version` 要求 `HTTP/d.d` | `parser.rs:503-515` |
+| G4 | 输出重定向 `>> file` / `>>! file` | GET.http:42,48 | `>>` 被 `parse_simple_body` 吞入正文 | `parser.rs:199+`、`model.rs` |
+| G5 | 前置请求脚本 `< {% ... %}` | Loop:2-8 / Scripts:54-59,69-75,85-90,108-110 | 被误解析为 `MessageBody::FileRef{path:"{%...%}"}` | `parser.rs:189-196` |
+| G6 | 多行响应处理器 `> {% ⏎ ... ⏎ %}` | Loop:20-26 / Scripts 全部 | `handler_from` 只支持单行（`rfind("%}")`） | `parser.rs:642-653` |
+| G7 | 动态变量 `{{$random.uuid}}` `{{$timestamp}}` `{{$random.integer()}}` | GET.http:36 / POST.http:41-43 | `scan_env_var` 标识符字符集仅 `[A-Za-z0-9_-]`，`.` 不匹配 | `env.rs:73-80` |
+| G8 | 内置路径变量 `{{$historyFolder}}` `{{$projectRoot}}` | GET.http:42,48 | 无 | `env.rs` |
+| G9 | JSONPath 模板 `{{$.clients..id}}`（递归下降） | Loop:14-17,33-34 | 无 JSONPath 求值器 | 新模块 |
+| G10 | 多值模板 → 请求循环执行 N 次 | Loop 全文件 | `run_request` 只发一次 | `execute.rs`、`http-cli` |
+| G11 | 变量值可为 JSON（数组/对象），非仅字符串 | Loop:3-7,21 | `Environment` = `HashMap<String,String>` | `env.rs` |
+| G12 | x-www-form-urlencoded 正文格式化 + `%+`/`%&`/`%=` 转义 | POST.http:14-16 | `build_body` 无 urlencoded 分支 | `execute.rs` |
+| G13 | 按请求差异化 client：重定向策略 / cookie jar / timeout / HTTP 版本 | GET.http:20,24,51 | `Dispatcher` 单一全局 client（`Policy::none()` + 30s） | `dispatch.rs` |
+| G14 | `client.test(name, fn)` / `client.assert(cond,msg)` / `client.global.clearAll()` / `client.global.headers.set` | Scripts 全部 / Loop:22,24 | handler 只有顶层 `assert`、`client.global.set/get`、`client.log` | `handler.rs` |
+| G15 | `response.contentType.mimeType/charset`、`response.headers.valueOf/valuesOf`、`response.cookies()` | Scripts:28,47 | 只有 `response.headers.value` | `handler.rs` |
+| G16 | `request.*` 对象（method/url/body/headers/environment/variables/iteration/templateValue） | Loop:21,38,41 / Scripts:56,71,72,89 | 无 | `handler.rs` |
+| G17 | `crypto.sha256()` / `crypto.hmac.sha256()` 链式 API | Scripts:55-57,70-73 | 无 | `handler.rs` |
+| G18 | 全局函数 `jsonPath(obj, expr)` | Loop:23,45 | 无 | `handler.rs` |
+| G19 | ES 模块 `import {x} from "./my-utils"` | Scripts:87,100 | rquickjs `loader` feature 已开但未接线 | `handler.rs` |
+| G20 | 脚本内 `{{var}}` 替换、模板字符串、ES6 语法（`let`/`const`/箭头/反引号） | Loop / Scripts 全部 | 未验证 | `handler.rs` |
+| G21 | 环境文件 `http-client.env.json` + `http-client.private.env.json`（后者优先） | Scripts:71 | CLI 只读公开 env，无私有 env、无 core 侧加载器 | `env.rs`、`http-cli` |
+| G22 | 变量作用域优先级 environment > global > file(`@x = y`) > request | 官方文档 | 只有单层 `Environment` | `env.rs` |
+| G23 | 批量执行整个文件 + 测试汇总 + 退出码 | 全部 example | `run_request` 单请求、不跑 handler | `http-cli/lib.rs` |
+| G24 | JSON 无引号位置的字符串型动态变量自动加引号 | POST.http:41 | 无 | `execute.rs` |
+
+已确认可用（无需改动）：JSON body、multipart（含 `< file` part）、`<> response-ref`、多行缩进 query/path/header、`{{var}}` 基础替换、percent-encoding 不二次编码、rquickjs 沙箱与超时中断、httpmock 集成测试骨架。
+
+#### 7.1 Model 扩展（`model.rs`）
+
+```rust
+pub struct Request {
+    // …既有字段…
+    pub pre_request_script: Option<ResponseHandler>, // 复用 Inline/FileRef 两态
+    pub output_redirect: Option<OutputRedirect>,     // >> / >>!
+    pub tags: Vec<DocTag>,                           // @no-redirect 等
+}
+
+pub struct OutputRedirect { pub path: String, pub force: bool }
+
+pub enum DocTag {
+    NoRedirect, NoCookieJar, NoAutoEncoding, NoLog,
+    Timeout { millis: u64 }, ConnectionTimeout { millis: u64 },
+    Name { value: String },
+}
+```
+
+#### 7.2 Lexer / Parser
+
+- **G1**：`lexer.rs` 增加 `//` 前缀 → `Line::Comment`（`###` 优先级不变）。
+- **G2**：`parser.rs` 不再丢弃注释行；在请求块起始处收集紧邻的 `#`/`//` 注释，正则扫描 `@(no-redirect|no-cookie-jar|no-auto-encoding|no-log|timeout|connection-timeout|name)\b(\s+\d+|\s+[^ ]+)?` 产出 `DocTag`。
+- **G3**：`is_http_version` 放宽为 `HTTP/` + digits（`HTTP/2` → 2.0）；`execute.rs` 的 `http_version` 映射增加 `"HTTP/2" | "HTTP/2.0"` → `reqwest::Version::HTTP_2`。
+- **G4**：`parse_simple_body` 的正文终止符集合增加 `>>`（含 `>>!`）；新增 `parse_output_redirect()`，在 `parse_response_ref()` 之后调用。
+- **G5**：请求解析入口先探测 `< {%`（前置脚本），与 `< file`（正文文件引用）区分——判据为 `{%` 前缀；前置脚本同样支持多行 `%}` 收尾与 `> script.js` 文件引用。
+- **G6**：新增 `parse_braced_script()` 通用扫描器：从 `{%` 起逐行累积，直到某行以 `%}` 结束（支持同行 `> {% ... %}` 与跨行两种形态）。`response_handler` 与 `pre_request_script` 共用。
+
+#### 7.3 动态变量与作用域（`env.rs` 重构）
+
+```rust
+pub enum VarValue { Str(String), Json(serde_json::Value) }
+
+pub struct Scope {          // 分层，查询按优先级穿透
+    pub environment: BTreeMap<String, VarValue>, // http-client[.private].env.json
+    pub global:      BTreeMap<String, VarValue>, // client.global.set
+    pub file:        BTreeMap<String, VarValue>, // in-place `@name = value`
+    pub request:     BTreeMap<String, VarValue>, // 前置脚本 request.variables.set
+}
+```
+
+- **G7**：`scan_env_var` 标识符字符集扩展为 `[A-Za-z0-9_.$\-\[\]()'",= ]`（覆盖 `$random.integer(1,100)` 与 `$.clients..id`），仍以 `}}` 收尾；未闭合报错不变。
+- **G7/G8**：新增 `dynamic.rs`——`resolve_dynamic(name, ctx) -> Option<VarValue>`：
+  - `$uuid` / `$random.uuid` → uuid v4
+  - `$timestamp` → unix 秒；`$isoTimestamp` → RFC3339 UTC
+  - `$randomInt` → `[0,1000)`；`$random.integer()` → `[0,1000)`；`$random.integer(from,to)` → `[from,to]`
+  - `$historyFolder` → `<projectRoot>/.http-history`（自动 mkdir）；`$projectRoot` → 工作目录
+  - 未命中 `$` 前缀 → 回落 `Scope` 查询
+- **G11**：`VarValue::Json` 允许 `request.variables.set("clients", [...])` 存入数组；替换到文本时，字符串直出、数字/布尔直出、对象/数组序列化为紧凑 JSON。
+- **G21**：`env.rs` 新增 `load_env_files(dir, env_name) -> Scope`：读 `http-client.env.json`（`{"env": {"k": "v"}}`，JetBrains 格式），再用 `http-client.private.env.json` 覆盖同名键（私有优先）。
+- **G22**：`Scope::get()` 按 environment → global → file → request 顺序查询（与官方文档一致：environment 最高）。
+- **G24**：替换时若 `Content-Type` 含 `json`（或 body 以 `{`/`[` 开头），且占位符紧邻字符不是 `"`，且 `VarValue` 为字符串型 → 插入 JSON 转义后的带引号字面量；数字/布尔型裸插。
+
+#### 7.4 JSONPath 与循环执行（新增 `jsonpath.rs`）
+
+- **G9**：自实现最小 JSONPath（不引第三方 crate，避免语义分歧）：
+  - `$` 根、`.field` 子字段、`[n]` 索引、`..field` 递归下降（DFS 收集所有同名键）
+  - 返回值 `Vec<&serde_json::Value>`；单值场景取第 0 个
+- **G10**：`execute.rs` 新增 `expand_iterations(request, scope) -> Vec<Iteration>`：
+  1. 扫描 path/query/headers/body 中所有 `{{$.…}}` 模板，按出现顺序编号 `template_index`
+  2. 对每个模板求 JSONPath 得值列表；迭代次数 = 各列表长度的最大值（长度不足者取模循环，与 JetBrains 行为一致）
+  3. 每个 `Iteration { index, bindings: Vec<(template_index, VarValue)> }`
+  4. 无 JSONPath 模板 → 单个 `Iteration { index: 0, bindings: [] }`
+- **G16**：`request.iteration()` → `index`；`request.templateValue(i)` → `bindings[i].1`（注入 handler 上下文）。
+
+#### 7.5 x-www-form-urlencoded（`execute.rs`）
+
+- **G12**：`build_body` 增加分支——当 `Content-Type` 为 `application/x-www-form-urlencoded` 且 body 为 `Inline` 时：
+  1. 先做 `%` 转义还原：`%+`→`+`、`%&`→`&`、`%=`→`=`、`%%`→`%`
+  2. 按 `&` 切分键值对（跨行续行已在 parser 阶段拼接为多行文本，此处按行尾 `&` 或换行合并）
+  3. 每对按第一个 `=` 分割，key/value 各自 trim 后 percent-encode（`form_urlencoded` 规则：空格→`+`）
+  4. 以 `&` 连接输出
+  - 例：`id = 999 &⏎value = content &⏎fact = IntelliJ %+ HTTP Client %= <3` → `id=999&value=content&fact=IntelliJ+%2B+HTTP+Client+%3D+%3C3`
+
+#### 7.6 Dispatch 扩展（`dispatch.rs`）
+
+- **G13**：`Dispatcher::send_with(req, opts)`，`opts` 由 `Request::tags` + `http_version` 推导：
+  - `@no-redirect` → `redirect(Policy::none())`；否则 `Policy::limited(10)`
+  - `@no-cookie-jar` → 不挂 jar；否则 `cookie_store(true)` + 进程级共享 `Arc<CookieStoreMutex>`
+  - `@timeout N` / `@connection-timeout N` → 覆盖默认 30s
+  - `HTTP/2` → `http2_prior_knowledge()` 或 `version(reqwest::Version::HTTP_2)`（reqwest 需开 `http2` feature）
+  - `@no-auto-encoding` → 跳过 `encode_path`/`encode_query`，原样发送
+  - client 按 opts 指纹缓存复用，避免每请求重建 TLS 上下文
+- **G4 落盘**：`write_output_redirect(resp, redirect, scope)`——解析 `{{$historyFolder}}` 后写文件；`force=false` 且文件已存在 → 追加 `-1`/`-2` 后缀；`force=true` → 直接覆盖。
+- Cargo：workspace `reqwest` features 增加 `http2`、`cookies`。
+
+#### 7.7 JS 引擎扩展（`handler.rs`）
+
+- **G14**：
+  - `client.test(name, fn)` → 执行 `fn`，捕获异常，产出 `TestResult{name, passed, message}`；不再向上抛
+  - `client.assert(cond, msg?)` → `cond` falsy 时抛 `AssertionError(msg)`（被 `client.test` 捕获）
+  - `client.global.clearAll()` / `client.global.clear(key)` / `client.global.headers.set(name, value)`
+  - `client.exit()`（标记中断后续迭代）
+- **G15**：`response.contentType.{mimeType,charset}`（解析 `Content-Type` 头）、`response.headers.valueOf(name)`（首个值）、`response.headers.valuesOf(name)`（数组）、`response.cookies()`
+- **G16**：注入 `request` 对象：`method`、`url()`、`body.tryGetSubstituted()`/`body.raw()`、`headers.valueOf(name)`、`environment.get(k)`、`variables.get(k)/set(k,v)`、`iteration()`、`templateValue(i)`。前置脚本与响应处理器共用同一注入器（前置脚本 `response` 为 `undefined`）。
+- **G17**：`crypto.sha256()/sha512()/sha1()/md5()` 与 `crypto.hmac.{sha256,sha512,sha1,md5}()`，链式 `.withTextSecret(s)` → `.updateWithText(s)` → `.digest()` → `.toHex()/.toBase64()`。Cargo 增加 `sha2`、`sha1`、`md-5`、`hmac`、`hex`、`base64`。
+- **G18**：全局 `jsonPath(obj, expr)` → 复用 §7.4 的 `jsonpath.rs`；单值返回值本身，多值返回数组。
+- **G19**：rquickjs `loader` 接线——`ModuleLoader` 以脚本所在目录为 base 解析相对路径，支持省略 `.js` 扩展名；`BuiltinResolver` 兜底。前置脚本与 handler 均以 **module** 方式求值，使顶层 `import` 合法。
+- **G20**：脚本源码在进入 QuickJS 前先跑一次 `scope.substitute()`，使 `{{var}}` 在脚本体内可用；`client.test` 的结果收集进 `HandlerState`，随 `DispatchResponse` 一并回传。
+- 测试汇总：`HandlerOutcome { logs, tests: Vec<TestResult>, globals_delta, diagnostics }`。
+
+#### 7.8 Runner 与 CLI 接线
+
+- **G23**：`http-core` 新增 `runner.rs`——`run_file(path, opts) -> FileReport`：
+  - 顺序执行文件内每个 `Request`；每个请求先跑前置脚本 → 展开迭代 → 逐迭代 dispatch → 跑响应处理器 → 写 `>>` / `<>`
+  - `client.global` 跨请求持久（单个 `HandlerRuntime` 复用）
+  - `FileReport { requests: Vec<RequestReport>, tests_passed, tests_failed, logs }`
+- `http-cli`：`run file.http` 默认跑**全文件**（保留 `--request` 过滤）；新增 `--all`、输出测试汇总（`✓/✗ name`）；`tests_failed > 0` → 退出码 1。`--json` 输出 `FileReport`。
+- `http-web` / `http-mcp` 后续复用 `run_file`（本 Phase 不改其契约）。
+
+#### 7.9 example fixtures 与 API 替换
+
+`examples.http-client.intellij.net` 实测返回 **503**（2026-09 已下线），按既定决策全部替换为 **httpbin.org**（实测各端点可用且响应结构兼容）：
+
+| 原端点 | 替换为 | 兼容性验证 |
+|---|---|---|
+| `/ip` | `https://httpbin.org/ip` | `{"origin": "…"}` |
+| `/get` | `https://httpbin.org/get` | 含 `headers` 键（满足 Scripts:38 断言）、`Content-Type: application/json` |
+| `/post` | `https://httpbin.org/post` | JSON → `.json`（满足 `$.json.balance` / `$.json.firstName`）、form → `.form`、文件 → `.files` |
+| `/anything` | `https://httpbin.org/anything` | 回显 query/headers/body |
+| `/cookies` | `https://httpbin.org/cookies` | `{"cookies": {…}}` |
+| `/status/{200,301,404}` | `https://httpbin.org/status/{200,301,404}` | 状态码一致 |
+| HTTP/2 | `https://httpbin.org/get HTTP/2` | httpbin 支持 h2 |
+
+需新建的 fixtures（example 中被引用但缺失）：
+
+- `example/http-client.env.json` — `{ "dev": { "host": "https://httpbin.org", "show_env": "1", "clients": [ …3 条… ] } }`（供 Loop 第二个请求与 GET 环境变量请求使用）
+- `example/http-client.private.env.json` — `{ "dev": { "secret": "…" } }`（供 Scripts HMAC 请求使用）
+- `example/request-form-data.json` — multipart `< ./request-form-data.json` 引用体
+- `example/my-utils.js` — `export function makeSignature()` / `export function findSignature(body)`（供 Scripts ESM import 使用）
+
+#### 7.10 测试策略
+
+- **离线为主**：httpmock 提供确定性响应，覆盖 G1–G24 每一项（详见 [TDD.md](./TDD.md) P7-1~P7-13）。
+- **公网 smoke**：`tests/public_smoke_test.rs` 全部标 `#[ignore]`，`cargo test -- --ignored` 才跑，直连 httpbin.org 验证四个 example 端到端。
+- **快照**：新增 parser 特性（tags / 前置脚本 / 多行 handler / `>>`）用 insta 快照锁定 AST。
+
+#### 7.11 明确范围外
+
+`sleep(ms)` / `await` / `setTimeout`（官方"执行延迟"文档特性）、`@no-log` 的日志脱敏落盘、gRPC/WebSocket 请求——四个 example 均未使用，不在本 Phase。
+
+#### 7.12 实施结果（Phase 7 已落地）
+
+G1–G24 全部实现，四个 example 端到端跑通：
+
+- **测试**：`cargo test --workspace --all-features` 全绿；`cargo clippy --workspace --all-features --all-targets` 零警告。
+  - `example_files_test.rs`（9）：解析级 + httpmock 离线运行级
+  - `public_smoke_test.rs`（8，`#[ignore]`）：实连 httpbin.org 全通过（含真实 HTTP/2 over TLS+ALPN）
+  - `parser_test.rs`（44，含 P7-2~P7-6 doc tags / 裸 HTTP 版本 / `>>` / 前置脚本 / 多行 handler）、`lexer_test.rs`（28，含 P7-1 `//` 注释）
+  - `runner_test.rs`（11）、`cli_test.rs`（19，含全文件执行与失败退出码）
+- **实施中新发现的缺口（已修）**：
+  1. **host 变量自带 scheme**：JetBrains 惯例把 scheme 放进 host 变量（`GET {{host}}/get`，`host = "https://httpbin.org"`）。
+     `execute.rs::build_url` 原先先拼默认 `http://` 再做变量替换，得到 `http://http://…`。
+     现改为替换后对 authority 做 `split_once("://")`，前缀通过 `is_scheme`（RFC 3986：首字符 alpha，其余 alnum/`+`/`-`/`.`）校验时内嵌 scheme 优先于请求行/默认值；
+     单测 `host_variable_may_carry_its_own_scheme` 覆盖三种情形。
+  2. **`consume_headers` 吞掉 `< file` body 行**：header 收集循环原先只在行首为 `> ` / `<> ` / `>>` / `> {%` 时才 break，
+     导致与请求行之间没有空行的 `< ./body.json`（无冒号）被当作非法 header 静默丢弃，body 变 `None`。
+     现 break 条件放宽为 `text.starts_with('>') || text.starts_with('<')`（header 不可能以这两字符开头），
+     使 `< file` 与各类 trailer 行正确交给 `parse_simple_body` / `parse_trailers`；
+     回归测试 `body_and_trailer_lines_survive_a_missing_blank_line` 锁定无空行时 FileRef + Inline handler + `>>` redirect 三者均不被吞。
+- **CLI 实跑核对**（`--env dev`，在 `/tmp` 副本上执行以免污染仓库）：GET 12 请求（`@no-redirect` 保留 301，`.http-history/` 两个落盘文件）、POST 4×200、Loop 2 请求×3 迭代（6 tests passed，exit 0）、Scripts 6 passed / 1 failed（"Failed test" 为官方示例的预期失败，exit 1）。
+
 ## 9. 待定事项（来自 spec 的 TODO）
 
 | spec 章节 | TODO | 本计划暂定方案 |
 |---|---|---|
-| 4 | 请求执行过程整体描述 | 见 §5.3 执行管线 |
+| 4 | 请求执行过程整体描述 | 见 §5.3 执行管线；批量执行见 Phase 7 §7.8 |
 | 4.1.1 | 非 ASCII host 处理 | 先 IDNA/punycode，后续按 RFC3986 校准 |
-| 4.4 | environment 定义与值插入 | 见 §5.4 约定 |
-| 4.5 | response handler API | 见 §5.5 最小 API |
+| 4.4 | environment 定义与值插入 | §5.4 约定 + Phase 7 §7.3（分层 Scope、动态变量、env 文件、JSON 值） |
+| 4.5 | response handler API | §5.5 最小 API + Phase 7 §7.7（client.test/assert、crypto、jsonPath、request.*、ESM） |
+| — | spec 未覆盖的 JetBrains 扩展 | doc tags、前置脚本、`>>` 输出重定向、JSONPath 循环：见 Phase 7 §7.0 差距表 |
 
 ## 10. 风险
 

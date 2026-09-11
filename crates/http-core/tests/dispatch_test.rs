@@ -5,8 +5,9 @@
 //! parsed `.http` requests against it. They exercise the full pipeline:
 //! parse → prepare (with file refs resolved) → reqwest dispatch → capture.
 
-use http_core::dispatch::{DispatchResponse, Dispatcher};
+use http_core::dispatch::{write_output_redirect, DispatchResponse, Dispatcher, SendOptions};
 use http_core::env::Environment;
+use http_core::model::OutputRedirect;
 use http_core::parser::parse_file;
 use httpmock::{Method, MockServer};
 use std::io::Write;
@@ -317,7 +318,7 @@ async fn dispatch_substitutes_env_vars_in_headers() {
     mock.assert();
 }
 
-// --- P2-5: response URL captured (no redirects followed by default) ---
+// --- P2-5: response URL captured (redirects followed by default, plan §7.6) ---
 
 #[tokio::test]
 async fn dispatch_captures_response_url() {
@@ -387,4 +388,169 @@ async fn dispatch_without_response_ref_does_not_write() {
         .await
         .expect("dispatch ok");
     assert_eq!(res.status, 200);
+}
+
+// --- P7-9: SendOptions derived from doc tags / HTTP version (plan §7.6) ---
+
+#[test]
+fn send_options_defaults_follow_redirects_and_cookie_jar() {
+    let req = first_req("GET https://x.test/api\n");
+    let opts = SendOptions::from_request(&req);
+    assert!(opts.follow_redirects);
+    assert!(opts.cookie_jar);
+    assert_eq!(opts.timeout, None);
+    assert_eq!(opts.connect_timeout, None);
+    assert!(!opts.http2);
+}
+
+#[test]
+fn send_options_from_tags_and_http2_version() {
+    let req = first_req(
+        "# @no-redirect\n\
+         # @no-cookie-jar\n\
+         # @timeout 1500\n\
+         # @connection-timeout 400\n\
+         GET https://x.test/api HTTP/2\n",
+    );
+    let opts = SendOptions::from_request(&req);
+    assert!(!opts.follow_redirects);
+    assert!(!opts.cookie_jar);
+    assert_eq!(opts.timeout, Some(Duration::from_millis(1500)));
+    assert_eq!(opts.connect_timeout, Some(Duration::from_millis(400)));
+    assert!(opts.http2);
+}
+
+#[tokio::test]
+async fn redirect_followed_by_default_but_not_with_tag() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/start");
+        then.status(302).header("Location", "/end");
+    });
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/end");
+        then.status(200).body("final");
+    });
+
+    let disp = Dispatcher::new();
+    // Default: follow → final body and URL.
+    let req = first_req(&format!("GET {}\n", server.url("/start")));
+    let res = disp.send_with(&req, &Environment::new(), None, &SendOptions::default()).await.unwrap();
+    assert_eq!(res.status, 200);
+    assert_eq!(res.url, server.url("/end"));
+
+    // @no-redirect → the 302 is surfaced as-is.
+    let req = first_req(&format!("# @no-redirect\nGET {}\n", server.url("/start")));
+    let opts = SendOptions::from_request(&req);
+    let res = disp.send_with(&req, &Environment::new(), None, &opts).await.unwrap();
+    assert_eq!(res.status, 302);
+    assert_eq!(res.header("Location"), Some("/end"));
+}
+
+#[tokio::test]
+async fn cookies_shared_across_requests_in_jar() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/set");
+        then.status(200).header("Set-Cookie", "sid=abc123; Path=/");
+    });
+    // Only matches when the stored cookie is replayed.
+    let check = server.mock(|when, then| {
+        when.method(Method::GET)
+            .path("/check")
+            .header("Cookie", "sid=abc123");
+        then.status(200).body("ok");
+    });
+
+    let disp = Dispatcher::new();
+    let set = first_req(&format!("GET {}\n", server.url("/set")));
+    disp.send_with(&set, &Environment::new(), None, &SendOptions::default())
+        .await
+        .unwrap();
+    let get = first_req(&format!("GET {}\n", server.url("/check")));
+    let res = disp
+        .send_with(&get, &Environment::new(), None, &SendOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(res.status, 200, "cookie replayed from the shared jar");
+    check.assert_hits(1);
+}
+
+#[tokio::test]
+async fn no_cookie_jar_never_stores_or_replays_cookies() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/set");
+        then.status(200).header("Set-Cookie", "sid=abc123; Path=/");
+    });
+    let check = server.mock(|when, then| {
+        when.method(Method::GET)
+            .path("/check")
+            .header_exists("Cookie");
+        then.status(200);
+    });
+
+    let disp = Dispatcher::new();
+    let set = first_req(&format!("# @no-cookie-jar\nGET {}\n", server.url("/set")));
+    let opts = SendOptions::from_request(&set);
+    assert!(!opts.cookie_jar);
+    disp.send_with(&set, &Environment::new(), None, &opts).await.unwrap();
+
+    let get = first_req(&format!("# @no-cookie-jar\nGET {}\n", server.url("/check")));
+    let opts = SendOptions::from_request(&get);
+    let res = disp.send_with(&get, &Environment::new(), None, &opts).await.unwrap();
+    // No mock matches a cookie-less /check → httpmock answers 404.
+    assert_eq!(res.status, 404);
+    check.assert_hits(0);
+}
+
+// --- P7-10: `>> file` / `>>! file` output redirect persistence (plan §7.6 G14) ---
+
+fn resp_of(body: &[u8]) -> DispatchResponse {
+    DispatchResponse {
+        status: 200,
+        headers: vec![],
+        body: body.to_vec(),
+        elapsed: Duration::ZERO,
+        url: "https://x.test/api".into(),
+    }
+}
+
+#[tokio::test]
+async fn output_redirect_force_overwrites_existing_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let redirect = OutputRedirect { path: "out.json".into(), force: true };
+    // Pre-existing file is overwritten.
+    std::fs::write(tmp.path().join("out.json"), b"old").unwrap();
+    let written = write_output_redirect(&resp_of(b"fresh"), &redirect, &Environment::new(), Some(tmp.path())).unwrap();
+    assert_eq!(written, tmp.path().join("out.json"));
+    assert_eq!(std::fs::read(&written).unwrap(), b"fresh");
+}
+
+#[tokio::test]
+async fn output_redirect_non_force_appends_numeric_suffix() {
+    let tmp = tempfile::tempdir().unwrap();
+    let redirect = OutputRedirect { path: "out.json".into(), force: false };
+    let env = Environment::new();
+    let resp = resp_of(b"one");
+    // First write: out.json.
+    let p1 = write_output_redirect(&resp, &redirect, &env, Some(tmp.path())).unwrap();
+    assert_eq!(p1.file_name().unwrap(), "out.json");
+    // Second: out-1.json, third: out-2.json.
+    let p2 = write_output_redirect(&resp, &redirect, &env, Some(tmp.path())).unwrap();
+    assert_eq!(p2.file_name().unwrap(), "out-1.json");
+    let p3 = write_output_redirect(&resp, &redirect, &env, Some(tmp.path())).unwrap();
+    assert_eq!(p3.file_name().unwrap(), "out-2.json");
+    assert_eq!(std::fs::read(&p1).unwrap(), b"one");
+}
+
+#[tokio::test]
+async fn output_redirect_substitutes_env_and_creates_dirs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut env = Environment::new();
+    env.set_project_root(tmp.path());
+    let redirect = OutputRedirect { path: "{{$historyFolder}}/nested/r.json".into(), force: true };
+    let written = write_output_redirect(&resp_of(b"body"), &redirect, &env, None).unwrap();
+    assert_eq!(written, tmp.path().join(".http-history").join("nested").join("r.json"));
+    assert_eq!(std::fs::read(&written).unwrap(), b"body");
 }

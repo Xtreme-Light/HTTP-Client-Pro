@@ -5,3 +5,5 @@ dist/
 .DS_Store
 *.log
 .trae/
+# HTTP Client 输出重定向 / $historyFolder 落盘目录（测试与 CLI 运行产物）
+.http-history/

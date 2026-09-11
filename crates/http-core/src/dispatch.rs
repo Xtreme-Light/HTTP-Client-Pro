@@ -7,11 +7,13 @@
 //! lives in [`crate::execute`]. Here we only translate a [`PreparedRequest`]
 //! into a `reqwest::Request`, send it, and capture the response.
 
-use crate::env::Environment;
+use crate::env::{substitute, Environment};
 use crate::error::{CoreError, ErrorKind, Result, Span};
 use crate::execute::{prepare_with, DiskResolver, PreparedRequest};
-use crate::model::Request;
+use crate::model::{DocTag, OutputRedirect, Request};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// A captured HTTP response, ready to be displayed, persisted or compared.
@@ -45,14 +47,85 @@ impl DispatchResponse {
     }
 }
 
+/// Per-request transport options derived from documentation tags
+/// (`@no-redirect`, `@no-cookie-jar`, `@timeout`, `@connection-timeout`) and
+/// the request line's HTTP version (plan §7.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendOptions {
+    /// Follow 3xx redirects. JetBrains' default is *follow*; `@no-redirect`
+    /// turns it off.
+    pub follow_redirects: bool,
+    /// Participate in the dispatcher's shared cookie jar. `@no-cookie-jar`
+    /// turns it off (cookies are neither sent nor stored).
+    pub cookie_jar: bool,
+    /// Overall request timeout (`@timeout <millis>`).
+    pub timeout: Option<Duration>,
+    /// Connect-phase timeout (`@connection-timeout <millis>`).
+    pub connect_timeout: Option<Duration>,
+    /// Force HTTP/2 (`GET … HTTP/2`).
+    pub http2: bool,
+}
+
+impl Default for SendOptions {
+    fn default() -> Self {
+        Self {
+            follow_redirects: true,
+            cookie_jar: true,
+            timeout: None,
+            connect_timeout: None,
+            http2: false,
+        }
+    }
+}
+
+impl SendOptions {
+    /// Derive options from a parsed request's tags and HTTP version.
+    pub fn from_request(req: &Request) -> Self {
+        let mut opts = Self::default();
+        if req.has_tag(&DocTag::NoRedirect) {
+            opts.follow_redirects = false;
+        }
+        if req.has_tag(&DocTag::NoCookieJar) {
+            opts.cookie_jar = false;
+        }
+        if let Some(ms) = req.timeout_millis() {
+            opts.timeout = Some(Duration::from_millis(ms));
+        }
+        if let Some(ms) = req.connection_timeout_millis() {
+            opts.connect_timeout = Some(Duration::from_millis(ms));
+        }
+        if let Some(v) = &req.line.http_version {
+            let v = v.to_ascii_uppercase();
+            opts.http2 = v == "HTTP/2" || v == "HTTP/2.0";
+        }
+        opts
+    }
+}
+
+/// Identity of a cached `reqwest::Client`: only client-level knobs take part
+/// (redirect policy, cookie store, connect timeout). Request-level knobs
+/// (timeout, HTTP version) are applied on the request builder.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ClientKey {
+    follow_redirects: bool,
+    cookie_jar: bool,
+    connect_timeout_ms: Option<u64>,
+}
+
 /// Sends [`PreparedRequest`]s over the wire.
 ///
-/// Wraps a `reqwest::Client` so the caller can configure TLS, timeouts,
-/// proxies, redirect policy, etc. [`Dispatcher::new`] uses a sane default
-/// client (no redirects followed, 30s timeout).
+/// Wraps a pool of `reqwest::Client`s (one per distinct client-level option
+/// combination) sharing a single cookie jar, so cookies set by one request are
+/// visible to later ones — mirroring the JetBrains HTTP Client session.
+/// [`Dispatcher::new`] uses sane defaults (follow redirects, shared cookie
+/// jar, 30s timeout).
 #[derive(Clone)]
 pub struct Dispatcher {
-    client: reqwest::Client,
+    clients: Arc<Mutex<HashMap<ClientKey, reqwest::Client>>>,
+    jar: Arc<reqwest::cookie::Jar>,
+    /// Optional user-supplied client that bypasses the pool entirely.
+    override_client: Option<reqwest::Client>,
+    base_timeout: Duration,
 }
 
 impl Default for Dispatcher {
@@ -62,21 +135,62 @@ impl Default for Dispatcher {
 }
 
 impl Dispatcher {
-    /// Build a dispatcher with a default `reqwest::Client` (no redirects,
-    /// 30s overall timeout). For custom configuration, construct the
-    /// `reqwest::Client` yourself and use [`Dispatcher::with_client`].
+    /// Build a dispatcher with a lazily-populated client pool (follow
+    /// redirects, shared cookie jar, 30s overall timeout).
     pub fn new() -> Self {
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("default reqwest client builds");
-        Self { client }
+        Self {
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            jar: Arc::new(reqwest::cookie::Jar::default()),
+            override_client: None,
+            base_timeout: Duration::from_secs(30),
+        }
     }
 
-    /// Use a pre-configured `reqwest::Client`.
+    /// Use a pre-configured `reqwest::Client` for every request. Per-request
+    /// options that are client-level (redirect policy, cookie jar, connect
+    /// timeout) are then ignored; `timeout` and HTTP/2 still apply.
     pub fn with_client(client: reqwest::Client) -> Self {
-        Self { client }
+        Self {
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            jar: Arc::new(reqwest::cookie::Jar::default()),
+            override_client: Some(client),
+            base_timeout: Duration::from_secs(30),
+        }
+    }
+
+    fn client_for(&self, opts: &SendOptions) -> reqwest::Client {
+        if let Some(c) = &self.override_client {
+            return c.clone();
+        }
+        let key = ClientKey {
+            follow_redirects: opts.follow_redirects,
+            cookie_jar: opts.cookie_jar,
+            connect_timeout_ms: opts.connect_timeout.map(|d| d.as_millis() as u64),
+        };
+        if let Ok(mut map) = self.clients.lock() {
+            if let Some(c) = map.get(&key) {
+                return c.clone();
+            }
+            let mut builder = reqwest::Client::builder().redirect(if opts.follow_redirects {
+                reqwest::redirect::Policy::limited(10)
+            } else {
+                reqwest::redirect::Policy::none()
+            });
+            if opts.cookie_jar {
+                builder = builder.cookie_provider(self.jar.clone());
+            }
+            if let Some(ct) = opts.connect_timeout {
+                builder = builder.connect_timeout(ct);
+            }
+            let client = builder.build().expect("reqwest client builds");
+            map.insert(key, client.clone());
+            client
+        } else {
+            // Poisoned lock: fall back to a one-off client.
+            reqwest::Client::builder()
+                .build()
+                .expect("reqwest client builds")
+        }
     }
 
     /// Convenience: prepare the AST [`Request`] with `env` + a [`DiskResolver`]
@@ -88,12 +202,24 @@ impl Dispatcher {
         env: &Environment,
         base_dir: Option<&Path>,
     ) -> Result<DispatchResponse> {
+        self.send_with(req, env, base_dir, &SendOptions::from_request(req))
+            .await
+    }
+
+    /// Like [`Dispatcher::send`] with explicit transport options.
+    pub async fn send_with(
+        &self,
+        req: &Request,
+        env: &Environment,
+        base_dir: Option<&Path>,
+        opts: &SendOptions,
+    ) -> Result<DispatchResponse> {
         let resolver = match base_dir {
             Some(b) => DiskResolver::new(b),
             None => DiskResolver::default(),
         };
         let prepared = prepare_with(req, env, &resolver)?;
-        self.send_prepared(&prepared).await
+        self.send_prepared_with(&prepared, opts).await
     }
 
     /// Like [`Dispatcher::send`], but also persists the response body to the
@@ -113,14 +239,27 @@ impl Dispatcher {
         Ok(res)
     }
 
+    /// Send an already-prepared request with default options.
+    pub async fn send_prepared(&self, prep: &PreparedRequest) -> Result<DispatchResponse> {
+        self.send_prepared_with(prep, &SendOptions::default()).await
+    }
+
     /// Send an already-prepared request. Use this when the caller needs to
     /// inspect the [`PreparedRequest`] (e.g. for logging) before dispatch.
-    pub async fn send_prepared(&self, prep: &PreparedRequest) -> Result<DispatchResponse> {
+    pub async fn send_prepared_with(
+        &self,
+        prep: &PreparedRequest,
+        opts: &SendOptions,
+    ) -> Result<DispatchResponse> {
         let method = method_to_reqwest(&prep.method)?;
-        let mut builder = self
-            .client
+        let client = self.client_for(opts);
+        let mut builder = client
             .request(method, &prep.url)
-            .header(reqwest::header::USER_AGENT, "http-client-pro/0.1");
+            .header(reqwest::header::USER_AGENT, "http-client-pro/0.1")
+            .timeout(opts.timeout.unwrap_or(self.base_timeout));
+        if opts.http2 {
+            builder = builder.version(reqwest::Version::HTTP_2);
+        }
 
         // Headers — skip the ones reqwest owns (Host is derived from URL).
         for h in &prep.headers {
@@ -248,4 +387,83 @@ pub fn write_response_ref(
             format!("failed to write response ref `{}`: {e}", resolved.display()),
         )
     })
+}
+
+/// Write the response body to the file named by a `>> path` / `>>! path`
+/// output redirect (plan §7.6 G14).
+///
+/// - The path is env-substituted first, so `>> {{$historyFolder}}/x.json`
+///   lands in `<project_root>/.http-history/x.json` (created on demand).
+/// - Relative paths resolve against `base_dir`.
+/// - `>>` (force = false): if the target exists, a numeric suffix is inserted
+///   before the extension (`x.json` → `x-1.json` → `x-2.json` …).
+/// - `>>!` (force = true): the existing file is overwritten.
+///
+/// Returns the path actually written.
+pub fn write_output_redirect(
+    resp: &DispatchResponse,
+    redirect: &OutputRedirect,
+    env: &Environment,
+    base_dir: Option<&Path>,
+) -> Result<PathBuf> {
+    let substituted = substitute(&redirect.path, env);
+    let p = PathBuf::from(substituted.trim());
+    let mut resolved = if p.is_absolute() {
+        p
+    } else if let Some(b) = base_dir {
+        b.join(p)
+    } else {
+        p
+    };
+    if let Some(parent) = resolved.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                CoreError::new(
+                    ErrorKind::Io,
+                    Span::new(0, 0),
+                    format!(
+                        "failed to create dir for output redirect `{}`: {e}",
+                        resolved.display()
+                    ),
+                )
+            })?;
+        }
+    }
+    if !redirect.force {
+        resolved = unique_path(&resolved);
+    }
+    std::fs::write(&resolved, &resp.body).map_err(|e| {
+        CoreError::new(
+            ErrorKind::Io,
+            Span::new(0, 0),
+            format!(
+                "failed to write output redirect `{}`: {e}",
+                resolved.display()
+            ),
+        )
+    })?;
+    Ok(resolved)
+}
+
+/// First non-existing variant of `path`: `a.json` → `a-1.json` → `a-2.json` …
+fn unique_path(path: &Path) -> PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("response");
+    let ext = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let suffix = ext.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    for n in 1..1000 {
+        let name = if suffix.is_empty() {
+            format!("{stem}-{n}")
+        } else {
+            format!("{stem}-{n}.{suffix}")
+        };
+        let candidate = parent.join(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    path.to_path_buf()
 }

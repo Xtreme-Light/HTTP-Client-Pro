@@ -32,6 +32,66 @@ pub struct Request {
     /// separator immediately above this request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Pre-request script (`< {% ... %}`), executed before dispatch.
+    /// Shares the [`ResponseHandler`] shape so `< script.js` also works.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_request_script: Option<ResponseHandler>,
+    /// Response output redirection (`>> file` / `>>! file`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_redirect: Option<OutputRedirect>,
+    /// Documentation tags harvested from the comments above the request
+    /// (`# @no-redirect`, `# @timeout 5000`, …).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<DocTag>,
+}
+
+impl Request {
+    pub fn has_tag(&self, tag: &DocTag) -> bool {
+        self.tags.iter().any(|t| t == tag)
+    }
+
+    /// First `@timeout` value in milliseconds, if declared.
+    pub fn timeout_millis(&self) -> Option<u64> {
+        self.tags.iter().find_map(|t| match t {
+            DocTag::Timeout { millis } => Some(*millis),
+            _ => None,
+        })
+    }
+
+    /// First `@connection-timeout` value in milliseconds, if declared.
+    pub fn connection_timeout_millis(&self) -> Option<u64> {
+        self.tags.iter().find_map(|t| match t {
+            DocTag::ConnectionTimeout { millis } => Some(*millis),
+            _ => None,
+        })
+    }
+}
+
+/// `>> path` (append-suffix on collision) / `>>! path` (force overwrite).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputRedirect {
+    pub path: String,
+    pub force: bool,
+}
+
+/// Request-scoping documentation tags (JetBrains HTTP Client extension).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "tag", rename_all = "kebab-case")]
+pub enum DocTag {
+    /// `@no-redirect` — do not follow 3xx.
+    NoRedirect,
+    /// `@no-cookie-jar` — neither send nor store cookies.
+    NoCookieJar,
+    /// `@no-auto-encoding` — send path/query verbatim.
+    NoAutoEncoding,
+    /// `@no-log` — suppress request/response logging.
+    NoLog,
+    /// `@timeout <millis>` — overall request timeout.
+    Timeout { millis: u64 },
+    /// `@connection-timeout <millis>` — connect-phase timeout.
+    ConnectionTimeout { millis: u64 },
+    /// `@name <text>` — explicit request name.
+    Name { value: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

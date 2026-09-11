@@ -1,0 +1,48 @@
+### Request with Loop Support, variables from request
+< {%
+  request.variables.set("clients", [ // test data
+    {"id": 1, "firstName": "George", "lastName": "Franklin", balance: 100},
+    {"id": 2, "firstName": "John", "lastName": "Doe", balance: 1500},
+    {"id": 3, "firstName": "Eduardo", "lastName": "Rodriquez", balance: 10}
+  ])
+%}
+
+POST https://httpbin.org/post
+Content-Type: application/json
+
+{
+  "clientId": {{$.clients..id}},
+  "firstName": "{{$.clients..firstName}}",
+  "lastName": "{{$.clients..lastName}}",
+  "balance": "{{$.clients..balance}}"
+}
+
+> {%
+  let current = request.variables.get("clients")[request.iteration()]
+  client.test(`Account ${current.lastName} has initial balance ${current.balance}`, () => {
+    let responseBalance = jsonPath(response.body, "$.json.balance")
+    client.assert(responseBalance == current.balance)
+  })
+%}
+
+### Request with Loop Support, variables from environment file
+POST https://httpbin.org/post
+Content-Type: application/json
+
+{
+  "clientId": {{$.clients..id}},
+  "firstName": "{{$.clients..firstName}}"
+}
+
+> {%
+  let clientId = request.templateValue(0)
+  client.log(`Client id: ${clientId}`)
+  
+  let firstName = request.templateValue(1)
+  client.log(`First name is: ${firstName}`)
+  
+  client.test(`Client ${clientId} has initial firstName ${firstName}`, () => {
+    let currentFirstName = jsonPath(response.body, "$.json.firstName")
+    client.assert(firstName == currentFirstName)
+  })
+%}

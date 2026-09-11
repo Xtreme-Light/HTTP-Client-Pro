@@ -18,7 +18,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 insta = { version = "1", features = ["yaml"] }
 percent-encoding = "2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart", "http2", "cookies"] }
 httpmock = { version = "0.7", default-features = false }
 http = "1"
 rquickjs = { version = "0.12", features = ["bindgen", "macro", "loader"] }
@@ -30,3 +30,13 @@ futures-util = "0.3"
 tempfile = "3"
 rmcp = { version = "3", features = ["server", "transport-io"] }
 schemars = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+rand = "0.8"
+sha2 = "0.10"
+sha1 = "0.10"
+md-5 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+base64 = "0.22"
+form_urlencoded = "1"

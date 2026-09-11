@@ -1,0 +1,51 @@
+### GET request with a header
+GET https://httpbin.org/ip
+Accept: application/json
+
+###
+GET https://httpbin.org/get
+    ?generated-in=IntelliJ IDEA
+
+### GET request with parameter
+GET https://httpbin.org/get?show_env=1
+Accept: application/json
+
+### GET request with environment variables
+//TIP <p>Press <shortcut actionId="GotoDeclaration"/> on <b>{{show_env}}</b> to navigate to declaration</p>
+//TIP <p>Putting <i>scheme:// + host</i> to <b>{{host}}</b> allows switching schemes between different environments</p>
+GET {{host}}/get?show_env={{show_env}}
+Accept: application/json
+
+### GET request with disabled redirects
+# @no-redirect
+GET https://httpbin.org/status/301
+
+### GET request without cookies
+# @no-cookie-jar
+GET https://httpbin.org/cookies
+
+### The request will be sent as is, without encoding
+# @no-auto-encoding
+GET https://httpbin.org/anything?value=@+$!
+
+### GET request with cookie passed through headers
+GET https://httpbin.org/cookies
+Cookie: theme=darcula; last_searched_location=IJburg
+
+### GET request with dynamic variables
+GET https://httpbin.org/anything?id={{$random.uuid}}&ts={{$timestamp}}
+
+### Define own filename for saved response file
+GET https://httpbin.org/get
+
+//TIP File will be named <i>my-response.json</i> instead of default name
+>> {{$historyFolder}}/my-response.json
+
+### Force own filename for saved response file
+GET https://httpbin.org/get
+
+//TIP If there is already a <i>my-forced-response.json</i>, HTTP Client will override it
+>>! {{$historyFolder}}/my-forced-response.json
+
+### GET request with HTTP/2 protocol
+GET https://httpbin.org/get HTTP/2

@@ -11,8 +11,8 @@
 use crate::error::{CoreError, Diagnostic, Result, Span};
 use crate::lexer::{Lexer, Line};
 use crate::model::{
-    HeaderField, MessageBody, MessagePartBody, Method, MultipartField, Request, RequestLine,
-    RequestTarget, RequestsFile, ResponseHandler,
+    DocTag, HeaderField, MessageBody, MessagePartBody, Method, MultipartField, OutputRedirect,
+    Request, RequestLine, RequestTarget, RequestsFile, ResponseHandler,
 };
 
 /// Parse a full `.http` file (spec 3.1).
@@ -43,20 +43,52 @@ impl Parser {
         // so the next parsed request can pick it up as its name (JetBrains
         // HTTP Client convention). `None` means "no name".
         let mut pending_name: Option<String> = None;
+        // Doc tags (`# @no-redirect`, …) accumulate from the comment lines
+        // above a request and bind to the next request only.
+        let mut pending_tags: Vec<DocTag> = Vec::new();
+        // A pre-request script (`< {% … %}`) appears before the request line.
+        let mut pending_pre: Option<ResponseHandler> = None;
         while self.pos < self.lines.len() {
             match &self.lines[self.pos] {
                 Line::Separator { comment, .. } => {
                     pending_name = comment.clone().filter(|s| !s.trim().is_empty());
+                    pending_tags.clear();
                     self.pos += 1;
                 }
-                Line::Comment { .. } | Line::Empty { .. } => {
+                Line::Comment { text, .. } => {
+                    let text = text.clone();
+                    pending_tags.extend(parse_doc_tags(&text));
+                    self.pos += 1;
+                }
+                Line::Empty { .. } => {
                     self.pos += 1;
                 }
                 Line::Content { text, span } => {
                     let text = text.clone();
                     let span = *span;
-                    let name = pending_name.take();
-                    match self.parse_request(text, span, name) {
+                    // `< {% … %}` opens a pre-request script, not a request.
+                    if pending_pre.is_none() {
+                        if let Some(rest) = script_open_rest(&text, "<") {
+                            self.pos += 1;
+                            let rest = rest.to_string();
+                            pending_pre = Some(ResponseHandler::Inline {
+                                script: self.collect_script_body(&rest),
+                            });
+                            continue;
+                        }
+                    }
+                    let tags = std::mem::take(&mut pending_tags);
+                    let sep_name = pending_name.take();
+                    // An explicit `@name` tag wins over the `### name` comment.
+                    let name = tags
+                        .iter()
+                        .find_map(|t| match t {
+                            DocTag::Name { value } => Some(value.clone()),
+                            _ => None,
+                        })
+                        .or(sep_name);
+                    let pre = pending_pre.take();
+                    match self.parse_request(text, span, name, tags, pre) {
                         Ok(req) => requests.push(req),
                         Err(err) => {
                             diagnostics.push(err.into());
@@ -97,6 +129,8 @@ impl Parser {
         line_text: String,
         span: Span,
         name: Option<String>,
+        tags: Vec<DocTag>,
+        pre_request_script: Option<ResponseHandler>,
     ) -> Result<Request> {
         // Gather continuation lines (spec 2.2 new-line-with-indent) for the
         // request target (spec 3.2.1.3).
@@ -129,8 +163,7 @@ impl Parser {
             self.parse_simple_body()
         };
 
-        let response_handler = self.parse_response_handler();
-        let response_ref = self.parse_response_ref();
+        let (response_handler, response_ref, output_redirect) = self.parse_trailers();
 
         Ok(Request {
             line: request_line,
@@ -139,6 +172,9 @@ impl Parser {
             response_handler,
             response_ref,
             name,
+            pre_request_script,
+            output_redirect,
+            tags,
         })
     }
 
@@ -153,6 +189,14 @@ impl Parser {
                     self.pos += 1;
                 }
                 Line::Content { text, .. } => {
+                    // Stop at trailer lines (`> ` handler, `<> ` ref, `>>`
+                    // redirect) and at body openers (`< file`) so a request
+                    // with no blank line between its parts still reaches
+                    // `parse_simple_body` / `parse_trailers` instead of being
+                    // eaten as a (colon-less) header.
+                    if text.starts_with('>') || text.starts_with('<') {
+                        break;
+                    }
                     self.pos += 1;
                     let mut value_continuation = Vec::new();
                     while let Some(Line::Indented { text: ct, .. }) = self.lines.get(self.pos) {
@@ -205,8 +249,13 @@ impl Parser {
                 Line::Content { text, .. } => {
                     // Body terminators per spec 3.2.3 message-line:
                     // `< ` (input-file-ref starts a new body kind), `<> `,
+                    // `> ` (response handler), `>>` (output redirect),
                     // and `###` (separator, handled above).
-                    if text.starts_with("<> ") || text.starts_with("> ") || text.starts_with('<') {
+                    if text.starts_with("<> ")
+                        || text.starts_with("> ")
+                        || text.starts_with(">>")
+                        || text.starts_with('<')
+                    {
                         break;
                     }
                     lines.push(text.clone());
@@ -322,27 +371,202 @@ impl Parser {
         }
     }
 
-    fn parse_response_handler(&mut self) -> Option<ResponseHandler> {
-        let rest = self.peek_content_after_prefix("> ")?;
-        self.pos += 1;
-        Some(handler_from(&rest))
-    }
+    /// Parse the trailer lines that may follow a message body, in any order:
+    /// `> {% … %}` / `> file` (response handler, spec 3.2.4), `<> file`
+    /// (response ref, spec 3.2.5), `>> file` / `>>! file` (output redirect).
+    fn parse_trailers(
+        &mut self,
+    ) -> (
+        Option<ResponseHandler>,
+        Option<String>,
+        Option<OutputRedirect>,
+    ) {
+        let mut handler = None;
+        let mut reference = None;
+        let mut redirect = None;
+        loop {
+            // Comments interleaved with trailers are insignificant (`//TIP …`).
+            while matches!(self.lines.get(self.pos), Some(Line::Comment { .. })) {
+                self.pos += 1;
+            }
+            let Some(Line::Content { text, .. }) = self.lines.get(self.pos) else {
+                break;
+            };
+            let text = text.clone();
 
-    fn parse_response_ref(&mut self) -> Option<String> {
-        let rest = self.peek_content_after_prefix("<> ")?;
-        self.pos += 1;
-        Some(rest.to_string())
-    }
-
-    /// If the current line is a Content line starting with `prefix`, return
-    /// the substring after the prefix (owned to avoid borrow conflicts).
-    fn peek_content_after_prefix(&self, prefix: &str) -> Option<String> {
-        if let Some(Line::Content { text, .. }) = self.lines.get(self.pos) {
-            text.strip_prefix(prefix).map(str::to_string)
-        } else {
-            None
+            if handler.is_none() {
+                if let Some(rest) = script_open_rest(&text, ">") {
+                    self.pos += 1;
+                    let rest = rest.to_string();
+                    handler = Some(ResponseHandler::Inline {
+                        script: self.collect_script_body(&rest),
+                    });
+                    continue;
+                }
+                if let Some(rest) = text.strip_prefix("> ") {
+                    self.pos += 1;
+                    handler = Some(ResponseHandler::FileRef {
+                        path: rest.trim().to_string(),
+                    });
+                    continue;
+                }
+            }
+            if redirect.is_none() {
+                if let Some(r) = parse_output_redirect(&text) {
+                    self.pos += 1;
+                    redirect = Some(r);
+                    continue;
+                }
+            }
+            if reference.is_none() {
+                if let Some(rest) = text.strip_prefix("<> ") {
+                    self.pos += 1;
+                    reference = Some(rest.trim().to_string());
+                    continue;
+                }
+            }
+            break;
         }
+        (handler, reference, redirect)
     }
+
+    /// Collect the body of a `{% … %}` script block. `first` is the text that
+    /// followed `{%` on the opening line; the current position is the line
+    /// after it. Consumes lines up to and including the one ending in `%}`.
+    ///
+    /// Handles both the single-line form (`> {% script %}`) and the multiline
+    /// form used throughout the JetBrains examples.
+    fn collect_script_body(&mut self, first: &str) -> String {
+        let head = first.trim_end();
+        // Single-line form.
+        if let Some(idx) = head.rfind("%}") {
+            return head[..idx].trim().to_string();
+        }
+        let mut out: Vec<String> = Vec::new();
+        if !head.is_empty() {
+            out.push(head.to_string());
+        }
+        while let Some(line) = self.lines.get(self.pos) {
+            let raw = match line {
+                Line::Content { text, .. } => text.clone(),
+                Line::Indented { indent, text, .. } => format!("{indent}{text}"),
+                Line::Empty { .. } => String::new(),
+                // The lexer already stripped the marker; `//` restores a valid
+                // JS comment for either `//` or `#` originals.
+                Line::Comment { text, .. } => format!("//{text}"),
+                Line::Separator { .. } => break,
+            };
+            self.pos += 1;
+            let trimmed = raw.trim_end();
+            if let Some(kept) = trimmed.strip_suffix("%}") {
+                let kept = kept.trim_end();
+                if !kept.is_empty() {
+                    out.push(kept.to_string());
+                }
+                break;
+            }
+            out.push(raw);
+        }
+        out.join("\n").trim().to_string()
+    }
+}
+
+/// If `text` opens a `{% … %}` script block after `marker` (`"<"` for a
+/// pre-request script, `">"` for a response handler), return the text that
+/// follows `{%`. `>>` (output redirect) never matches the `">"` marker.
+fn script_open_rest<'a>(text: &'a str, marker: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix(marker)?.trim_start();
+    if marker == ">" && rest.starts_with('>') {
+        return None;
+    }
+    rest.strip_prefix("{%")
+}
+
+/// Parse a `>> path` / `>>! path` output-redirect line.
+fn parse_output_redirect(text: &str) -> Option<OutputRedirect> {
+    let rest = text.strip_prefix(">>")?;
+    let (force, rest) = match rest.strip_prefix('!') {
+        Some(r) => (true, r),
+        None => (false, rest),
+    };
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let path = rest.trim().to_string();
+    if path.is_empty() {
+        return None;
+    }
+    Some(OutputRedirect { path, force })
+}
+
+/// Recognised documentation tags (JetBrains HTTP Client extension).
+const TAG_NAMES: &[&str] = &[
+    "no-redirect",
+    "no-cookie-jar",
+    "no-auto-encoding",
+    "no-log",
+    "connection-timeout",
+    "timeout",
+    "name",
+];
+
+/// Harvest `@tag [value]` occurrences from a comment's text.
+///
+/// Unknown `@words` are ignored so ordinary prose comments stay inert.
+/// `connection-timeout` is listed before `timeout` so the longer name wins.
+fn parse_doc_tags(text: &str) -> Vec<DocTag> {
+    let mut tags = Vec::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '@' {
+            i += 1;
+            continue;
+        }
+        let name_start = i + 1;
+        let mut name_end = name_start;
+        while name_end < chars.len()
+            && (chars[name_end].is_ascii_alphanumeric() || chars[name_end] == '-')
+        {
+            name_end += 1;
+        }
+        let name: String = chars[name_start..name_end].iter().collect();
+        if !TAG_NAMES.contains(&name.as_str()) {
+            i = name_end.max(i + 1);
+            continue;
+        }
+        // Value runs to the next `@` or end of line.
+        let mut value_end = name_end;
+        while value_end < chars.len() && chars[value_end] != '@' {
+            value_end += 1;
+        }
+        let value: String = chars[name_end..value_end].iter().collect();
+        let value = value.trim();
+        let tag = match name.as_str() {
+            "no-redirect" => DocTag::NoRedirect,
+            "no-cookie-jar" => DocTag::NoCookieJar,
+            "no-auto-encoding" => DocTag::NoAutoEncoding,
+            "no-log" => DocTag::NoLog,
+            "timeout" | "connection-timeout" => {
+                let millis = value.split_whitespace().next().unwrap_or("").parse::<u64>();
+                match millis {
+                    Ok(m) if name == "timeout" => DocTag::Timeout { millis: m },
+                    Ok(m) => DocTag::ConnectionTimeout { millis: m },
+                    // A numeric tag with no parsable value is not a tag at all.
+                    Err(_) => {
+                        i = value_end.max(name_end);
+                        continue;
+                    }
+                }
+            }
+            _ => DocTag::Name {
+                value: value.to_string(),
+            },
+        };
+        tags.push(tag);
+        i = value_end.max(name_end);
+    }
+    tags
 }
 
 /// Build a multipart field incrementally from raw body lines.
@@ -502,16 +726,19 @@ fn split_request_line_tokens(text: &str) -> Vec<String> {
 
 fn is_http_version(s: &str) -> bool {
     // spec 3.2.1: `HTTP/` (digit)+ `.` (digit)+
+    // JetBrains also accepts the bare minor-less form (`HTTP/2`), which the
+    // official examples use, so `HTTP/` (digit)+ is accepted as well.
     let Some(rest) = s.strip_prefix("HTTP/") else {
         return false;
     };
-    let Some((major, minor)) = rest.split_once('.') else {
+    if rest.is_empty() {
         return false;
-    };
-    !major.is_empty()
-        && !minor.is_empty()
-        && major.bytes().all(|b| b.is_ascii_digit())
-        && minor.bytes().all(|b| b.is_ascii_digit())
+    }
+    let all_digits = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    match rest.split_once('.') {
+        Some((major, minor)) => all_digits(major) && all_digits(minor),
+        None => all_digits(rest),
+    }
 }
 
 fn parse_target(s: &str, span: Span) -> Result<RequestTarget> {
@@ -638,20 +865,6 @@ fn extract_multipart_boundary(content_type: &str) -> Option<String> {
     }
 }
 
-/// Build a [`ResponseHandler`] from the text after `> `.
-fn handler_from(rest: &str) -> ResponseHandler {
-    // spec 3.2.4: `> {% handler-script %}` | `> file-path`
-    if let Some(stripped) = rest.strip_prefix("{%") {
-        if let Some(inner_end) = stripped.rfind("%}") {
-            let script = stripped[..inner_end].trim().to_string();
-            return ResponseHandler::Inline { script };
-        }
-    }
-    ResponseHandler::FileRef {
-        path: rest.trim().to_string(),
-    }
-}
-
 impl Method {
     fn from_str(s: &str) -> Option<Self> {
         match s {
@@ -677,8 +890,12 @@ mod tests {
     fn http_version_check() {
         assert!(is_http_version("HTTP/1.1"));
         assert!(is_http_version("HTTP/2.0"));
+        // Bare minor-less form, as used by the official examples (`… HTTP/2`).
+        assert!(is_http_version("HTTP/2"));
+        assert!(is_http_version("HTTP/1"));
         assert!(!is_http_version("HTTP/x.1"));
-        assert!(!is_http_version("HTTP/1"));
+        assert!(!is_http_version("HTTP/x"));
+        assert!(!is_http_version("HTTP/"));
         assert!(!is_http_version("HTTP1.1"));
         assert!(!is_http_version("http://example.com"));
     }
@@ -724,13 +941,16 @@ mod tests {
 
     #[test]
     fn handler_inline_vs_file() {
+        let inline = parse_file("GET https://x.test/a\n> {% client.global.set(\"x\", 1); %}\n").unwrap();
         assert!(matches!(
-            handler_from("{% client.global.set(\"x\", 1); %}"),
-            ResponseHandler::Inline { .. }
+            inline.requests[0].response_handler,
+            Some(ResponseHandler::Inline { .. })
         ));
+
+        let file = parse_file("GET https://x.test/a\n> ./handler.js\n").unwrap();
         assert!(matches!(
-            handler_from("./handler.js"),
-            ResponseHandler::FileRef { .. }
+            file.requests[0].response_handler,
+            Some(ResponseHandler::FileRef { .. })
         ));
     }
 }

@@ -1,0 +1,5 @@
+{
+  "name": "data.json",
+  "description": "Sample payload attached as a multipart file field",
+  "nested": { "id": 42, "tags": ["alpha", "beta"] }
+}

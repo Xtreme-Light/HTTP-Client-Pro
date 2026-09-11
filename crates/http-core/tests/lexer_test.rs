@@ -165,6 +165,39 @@ fn hash_comment_trailing_whitespace_trimmed() {
     assert_eq!(lex("# hello   \n"), vec![Line::comment("hello")]);
 }
 
+// --- P7-1: `//` comments in the JetBrains examples (G1) ---
+
+#[test]
+fn slash_comment_without_space_is_still_a_comment() {
+    // GET.http / POST.http use `//TIP …` with no space after the slashes.
+    assert_eq!(
+        lex("//TIP <p>Press <shortcut/></p>\n"),
+        vec![Line::comment("TIP <p>Press <shortcut/></p>")],
+    );
+}
+
+#[test]
+fn separator_beats_slash_comment() {
+    // `###` is classified before `//`, so `### //x` stays a separator whose
+    // comment text happens to start with slashes.
+    assert_eq!(
+        lex("### //x\n"),
+        vec![Line::separator(Some("//x".to_string()))],
+    );
+}
+
+#[test]
+fn indented_slash_line_is_indented_not_comment() {
+    // Inside a `{% %}` script block the examples indent JS comments
+    // (RequestWithScripts.http line 86). An indented `//` line is NOT a
+    // document comment: it is collected verbatim as `Line::Indented` so the
+    // script body keeps its `//` comment instead of losing the line.
+    assert_eq!(
+        lex("    // common script parts\n"),
+        vec![Line::indented("    ", "// common script parts")],
+    );
+}
+
 // --- P1-2: request separator (spec 2.5) ---
 
 #[test]
