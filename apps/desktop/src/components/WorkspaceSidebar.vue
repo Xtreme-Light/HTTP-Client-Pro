@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useWorkspaceStore, type FileEntry } from '../stores/workspace';
 import { getFs } from '../lib/backend/fs';
 import FileTreeNode from './FileTreeNode.vue';
@@ -53,6 +53,8 @@ async function toggleDir(path: string) {
     newSet.delete(path);
   } else {
     newSet.add(path);
+    // 展开时强制重新读取目录，避免使用启动期或外部变更前的过期缓存
+    dirCache.value.delete(path);
     await loadDir(path);
   }
   expandedDirs.value = newSet;
@@ -61,6 +63,15 @@ async function toggleDir(path: string) {
 async function refreshDir(path: string) {
   dirCache.value.delete(path);
   if (expandedDirs.value.has(path)) {
+    await loadDir(path);
+  }
+}
+
+/** 失效全部目录缓存并重新加载已展开的目录（文件系统外部变更时使用） */
+async function refreshTree() {
+  const expanded = [...expandedDirs.value];
+  dirCache.value = new Map();
+  for (const path of expanded) {
     await loadDir(path);
   }
 }
@@ -253,13 +264,12 @@ onMounted(async () => {
       console.error('Failed to init default workspace:', e);
     }
   }
-  // 加载所有根目录的内容到 dirCache
-  if (fs) {
-    for (const root of workspaceStore.roots) {
-      await loadDir(root.path);
-    }
-  }
+  // 目录内容在展开时按需加载（见 toggleDir），不在此处预加载：
+  // 预加载只会把「默认 requests.http 尚未创建」时的空列表缓存下来。
 });
+
+// 文件系统变更（保存 / 新建 / 删除）→ 刷新目录树
+watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
 </script>
 
 <template>

@@ -48,6 +48,7 @@ async function onDialogSave() {
       if (tab) {
         await fs.writeFile(path, tab.content);
         workspaceStore.markTabClean(path);
+        workspaceStore.notifyFsChange();
       }
     } catch (e) {
       alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);

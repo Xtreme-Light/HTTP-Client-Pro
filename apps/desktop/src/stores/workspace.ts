@@ -33,6 +33,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const roots = ref<WorkspaceRoot[]>([]);
   const tabs = ref<EditorTab[]>([]);
   const activeTabPath = ref<string | null>(null);
+  /** 文件系统变更计数 — 工作区树监听它来失效目录缓存 */
+  const fsRevision = ref(0);
 
   /** 当前激活标签页的路径（向后兼容） */
   const currentFilePath = computed(() => activeTabPath.value);
@@ -90,12 +92,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     persist();
   }
 
+  /** 通知文件系统已变化（新建 / 保存 / 删除），驱动工作区树刷新 */
+  function notifyFsChange() {
+    fsRevision.value++;
+  }
+
   /** 打开文件到标签页（若已存在则激活，否则新建标签） */
   function openFile(path: string, name: string, content: string) {
     const requestStore = useRequestStore();
     const existing = tabs.value.find((t) => t.path === path);
     if (existing) {
       activeTabPath.value = path;
+      // 无未保存修改时采用传入的最新内容（如「另存为」覆盖已打开的文件），
+      // 有未保存修改时保留编辑中的内容，避免被覆盖丢失。
+      if (!existing.isDirty) existing.content = content;
       requestStore.setSource(existing.content);
       return;
     }
@@ -226,9 +236,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   return {
-    roots, tabs, activeTabPath,
+    roots, tabs, activeTabPath, fsRevision,
     currentFilePath, currentFileName, isDirty, canSave, isSettingsActive,
-    load, persist, addRoot, removeRoot,
+    load, persist, addRoot, removeRoot, notifyFsChange,
     openFile, closeTab, switchTab, updateActiveContent,
     markDirty, markClean, markTabClean, getTab, openSettings,
     saveSession, restoreSession,

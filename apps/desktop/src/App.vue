@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { Splitpanes, Pane } from 'splitpanes';
 import 'splitpanes/dist/splitpanes.css';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useRequestStore } from './stores/request';
 import { useHistoryStore } from './stores/history';
 import { useEnvironmentStore } from './stores/environment';
@@ -34,8 +35,9 @@ const UNTITLED_RE = /^untitled-\d+$/;
 
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown);
-  // 优雅退出：关闭时保存现场（打开的标签页与激活状态）
+  // 浏览器环境的兜底：Tauri 关窗不一定触发 beforeunload，另见 registerCloseHook
   window.addEventListener('beforeunload', onBeforeUnload);
+  await registerCloseHook();
   try {
     const adapter = detectAdapter();
     setBackendAdapter(adapter);
@@ -47,10 +49,11 @@ onMounted(async () => {
   workspaceStore.load();
   requestStore.setSource(requestStore.source);
 
+  const fs = getFs();
   // 优先恢复上次退出现场；恢复失败（首次启动 / 数据损坏）走默认文件初始化
   const restored = workspaceStore.restoreSession();
+  if (fs && restored) await refreshCleanTabsFromDisk();
 
-  const fs = getFs();
   if (fs && !restored && !workspaceStore.currentFilePath) {
     try {
       const defaultPath = await fs.getDefaultWorkspace();
@@ -64,6 +67,7 @@ onMounted(async () => {
       } catch { /* file not found */ }
       if (existingContent === null) {
         await fs.writeFile(defaultFile, requestStore.source);
+        workspaceStore.notifyFsChange();
         workspaceStore.openFile(defaultFile, 'requests.http', requestStore.source);
       } else if (existingContent.length > 0) {
         workspaceStore.openFile(defaultFile, 'requests.http', existingContent);
@@ -79,14 +83,89 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown);
   window.removeEventListener('beforeunload', onBeforeUnload);
+  unlistenClose?.();
+  unlistenClose = null;
+  cancelPendingSessionSave();
 });
 
-/** 退出前保存现场 */
-function onBeforeUnload() {
+/* ================= 会话持久化 ================= */
+
+/** 现场变化后的自动保存延迟（毫秒） */
+const SESSION_SAVE_DELAY = 300;
+
+let sessionTimer: ReturnType<typeof setTimeout> | null = null;
+let unlistenClose: (() => void) | null = null;
+
+function cancelPendingSessionSave() {
+  if (sessionTimer !== null) {
+    clearTimeout(sessionTimer);
+    sessionTimer = null;
+  }
+}
+
+/** 立即保存现场，并丢弃待触发的自动保存 */
+function flushSession() {
+  cancelPendingSessionSave();
   workspaceStore.saveSession();
 }
 
+/** 退出前保存现场（浏览器 / 开发环境兜底） */
+function onBeforeUnload() {
+  flushSession();
+}
+
+// Tauri 关窗（含 Alt+F4、任务栏关闭）不一定触发 beforeunload，
+// 因此现场随用随存：标签页或激活状态变化后防抖写入 localStorage。
+watch(
+  () => [workspaceStore.tabs, workspaceStore.activeTabPath] as const,
+  () => {
+    cancelPendingSessionSave();
+    sessionTimer = setTimeout(() => {
+      sessionTimer = null;
+      workspaceStore.saveSession();
+    }, SESSION_SAVE_DELAY);
+  },
+  { deep: true },
+);
+
+/**
+ * 拦截 Tauri 的关闭请求：先同步落盘现场，再销毁窗口。
+ * 非 Tauri 环境（浏览器调试）注册失败时静默忽略，由 beforeunload 兜底。
+ */
+async function registerCloseHook() {
+  try {
+    const win = getCurrentWindow();
+    unlistenClose = await win.onCloseRequested(async (event) => {
+      event.preventDefault();
+      flushSession();
+      await win.destroy();
+    });
+  } catch { /* 非 Tauri 环境 */ }
+}
+
+/**
+ * 恢复现场后，已保存（干净）的文件标签从磁盘重读，采用外部修改；
+ * 有未保存修改的标签保留会话中的编辑内容。
+ */
+async function refreshCleanTabsFromDisk() {
+  const fs = getFs();
+  if (!fs) return;
+  for (const tab of workspaceStore.tabs) {
+    if (tab.type !== 'file' || tab.isDirty) continue;
+    try {
+      tab.content = await fs.readFile(tab.path);
+    } catch { /* 文件已删除 / 未命名标签 → 保留会话中的内容 */ }
+  }
+  const active = workspaceStore.getTab(workspaceStore.activeTabPath ?? '');
+  if (active?.type === 'file') requestStore.setSource(active.content);
+}
+
 /* ================= 文件操作 ================= */
+
+/** 待写入磁盘的内容 — 取标签页的最新内容（编辑器回写 store 有防抖延迟） */
+function contentToSave(path: string): string {
+  return workspaceStore.getTab(path)?.content ?? requestStore.source;
+}
 
 async function saveFile() {
   if (!workspaceStore.canSave) return;
@@ -99,8 +178,9 @@ async function saveFile() {
   const fs = getFs();
   if (!fs || !path) return;
   try {
-    await fs.writeFile(path, requestStore.source);
+    await fs.writeFile(path, contentToSave(path));
     workspaceStore.markClean();
+    workspaceStore.notifyFsChange();
   } catch (e) {
     alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -116,15 +196,20 @@ async function saveAs() {
     : '~/requests.http';
   const name = prompt('Save as (full path):', canUsePrev ? prevPath : fallback);
   if (!name) return;
+  const content = prevPath ? contentToSave(prevPath) : requestStore.source;
   try {
-    await fs.writeFile(name, requestStore.source);
+    await fs.writeFile(name, content);
     const parts = name.split('/');
-    workspaceStore.openFile(name, parts[parts.length - 1] || name, requestStore.source);
+    workspaceStore.openFile(name, parts[parts.length - 1] || name, content);
     // 「另存为」成功后关闭来源的未命名标签页
     if (prevPath && UNTITLED_RE.test(prevPath)) {
       workspaceStore.closeTab(prevPath);
     }
-    workspaceStore.markClean();
+    // 目标标签页内容与已写入内容一致时才标记为已保存
+    if (workspaceStore.getTab(name)?.content === content) {
+      workspaceStore.markTabClean(name);
+    }
+    workspaceStore.notifyFsChange();
   } catch (e) {
     alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
   }

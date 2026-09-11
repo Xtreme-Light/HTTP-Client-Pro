@@ -51,7 +51,9 @@ function getEntries(path: string): FileEntry[] {
         :expanded-dirs="expandedDirs"
         :dir-cache="dirCache"
         :level="(props.level ?? 1) + 1"
-        @context-menu="(entry, event) => $emit('context-menu', entry, event)"
+        @toggle-dir="(path) => $emit('toggle-dir', path)"
+        @file-click="(child) => $emit('file-click', child)"
+        @context-menu="(child, event) => $emit('context-menu', child, event)"
       />
       <div v-if="getEntries(entry.path).length === 0" class="empty-dir" :style="{ paddingLeft: (props.level ?? 1) * 16 + 24 + 'px' }">
         (empty)
