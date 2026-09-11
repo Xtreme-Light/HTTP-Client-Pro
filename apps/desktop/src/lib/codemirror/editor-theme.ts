@@ -156,5 +156,53 @@ export function buildEditorTheme(scheme: EditorScheme): Extension {
       fontWeight: 'bold',
       lineHeight: '1',
     },
+    // ---- 自动补全下拉框（见 lib/codemirror/completions.ts）----
+    '.cm-tooltip.cm-tooltip-autocomplete': {
+      backgroundColor: scheme.gutterBg,
+      border: `1px solid ${scheme.gutterBorder}`,
+      borderRadius: '4px',
+      boxShadow: `0 6px 20px var(--shadow)`,
+      overflow: 'hidden',
+    },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+      fontFamily: EDITOR_FONT_FAMILY,
+      fontSize: '13px',
+      maxHeight: '16em',
+      maxWidth: 'min(560px, 90vw)',
+    },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li': {
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: '10px',
+      padding: '2px 8px',
+      color: scheme.foreground,
+    },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]': {
+      backgroundColor: scheme.selection,
+      color: scheme.foreground,
+    },
+    '.cm-completionLabel': {
+      flex: '0 1 auto',
+      whiteSpace: 'pre',
+    },
+    '.cm-completionMatchedText': {
+      color: scheme.accent,
+      textDecoration: 'none',
+      fontWeight: '600',
+    },
+    '.cm-completionDetail': {
+      flex: '1 1 auto',
+      marginLeft: 'auto',
+      fontStyle: 'italic',
+      opacity: '0.7',
+      color: s.comment,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    },
+    // 按候选类型着色，与编辑器语法高亮保持一致
+    '.cm-http-completion-keyword .cm-completionLabel': { color: s.method, fontWeight: 'bold' },
+    '.cm-http-completion-url .cm-completionLabel': { color: s.url },
+    '.cm-http-completion-property .cm-completionLabel': { color: s.headerName },
+    '.cm-http-completion-variable .cm-completionLabel': { color: s.variable },
   });
 }

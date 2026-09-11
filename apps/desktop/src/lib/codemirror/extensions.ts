@@ -7,6 +7,7 @@ import { ViewPlugin, Decoration, type DecorationSet, EditorView, WidgetType, gut
 import { EditorState, Range, RangeSet } from '@codemirror/state';
 import { httpTags, httpLanguage } from './lang-http';
 import { looksLikeCurl, curlToHttp, composeCurlPasteInsertion } from './curl-to-http';
+import { httpCompletion, type CompletionDeps } from './completions';
 import { getRunStatus, type RunStatus } from './run-status';
 
 /** 高亮样式 — 每个 tag 对应一个 CSS class */
@@ -304,9 +305,13 @@ export function curlPasteSupport() {
   });
 }
 
-/** 组合所有 CodeMirror 扩展（runGutter 由 EditorPane 单独装入 compartment，便于状态刷新） */
+/**
+ * 组合所有 CodeMirror 扩展（runGutter 由 EditorPane 单独装入 compartment，便于状态刷新）。
+ * `completionDeps` 注入当前文档之外的补全语料（其它标签页 / 历史记录 / 环境变量）。
+ */
 export function httpExtensions(
   checkDefined: (name: string) => boolean,
+  completionDeps: CompletionDeps = {},
 ) {
   return [
     httpLanguage,
@@ -315,5 +320,6 @@ export function httpExtensions(
     variableDecoration(checkDefined),
     blockDecoration(),
     activeBlockDecoration(),
+    httpCompletion(completionDeps),
   ];
 }

@@ -8,8 +8,10 @@ import { useRequestStore } from '../stores/request';
 import { useEnvironmentStore } from '../stores/environment';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useSettingsStore } from '../stores/settings';
+import { useHistoryStore } from '../stores/history';
 import { useRunCurrent } from '../composables/useRunCurrent';
 import { httpExtensions, runGutter } from '../lib/codemirror/extensions';
+import { targetsOf } from '../lib/codemirror/completions';
 import { buildEditorTheme } from '../lib/codemirror/editor-theme';
 import { clearRunStatuses, onRunStatusChange } from '../lib/codemirror/run-status';
 import { blockToCurl } from '../lib/codemirror/http-to-curl';
@@ -20,6 +22,7 @@ const requestStore = useRequestStore();
 const envStore = useEnvironmentStore();
 const workspaceStore = useWorkspaceStore();
 const settings = useSettingsStore();
+const historyStore = useHistoryStore();
 const { run } = useRunCurrent();
 
 const editorEl = ref<HTMLElement>();
@@ -61,10 +64,14 @@ function onRunBlock(e: Event) {
 // 保存当前文件
 async function saveCurrentFile() {
   const fs = getFs();
-  if (!fs || !workspaceStore.currentFilePath) return;
+  const path = workspaceStore.currentFilePath;
+  if (!fs || !path) return;
+  // 取标签页内容：编辑器回写 requestStore 有 100ms 防抖，直接用 source 可能写入旧内容
+  const content = workspaceStore.getTab(path)?.content ?? requestStore.source;
   try {
-    await fs.writeFile(workspaceStore.currentFilePath, requestStore.source);
+    await fs.writeFile(path, content);
     workspaceStore.markClean();
+    workspaceStore.notifyFsChange();
   } catch (e) {
     alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -177,12 +184,26 @@ function onShortcutEvent(e: Event) {
   }
 }
 
+// 补全语料：其它标签页与执行历史里学习到的 URL（当前文档由扩展自行收集）
+function knownUrls(): string[] {
+  const others = workspaceStore.tabs.filter(
+    (t) => t.type === 'file' && t.path !== workspaceStore.activeTabPath,
+  );
+  return [
+    ...others.flatMap((t) => targetsOf(t.content)),
+    ...historyStore.items.map((i) => i.target),
+  ];
+}
+
 onMounted(() => {
   if (!editorEl.value) return;
 
   const extensions = [
     lineNumbers(),
-    ...httpExtensions((name) => envStore.isDefined(name)),
+    ...httpExtensions((name) => envStore.isDefined(name), {
+      knownUrls,
+      variableNames: () => Object.keys(envStore.vars),
+    }),
     runGutterCompartment.of(runGutter()),
     historyCompartment.of(history()),
     keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
