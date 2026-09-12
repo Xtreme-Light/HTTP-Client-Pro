@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { FileEntry } from '../../stores/workspace';
+import { normalizePath } from '../path';
 
 export interface TauriFs {
   listDir(path: string): Promise<FileEntry[]>;
@@ -34,7 +35,7 @@ function createTauriFs(): TauriFs {
   return {
     async listDir(path: string): Promise<FileEntry[]> {
       const res = await invoke<{ items: FileEntry[] }>('list_dir', { path });
-      return res.items;
+      return res.items.map((it) => ({ ...it, path: normalizePath(it.path) }));
     },
 
     async readFile(path: string): Promise<string> {
@@ -62,7 +63,7 @@ function createTauriFs(): TauriFs {
     },
 
     async getDefaultWorkspace(): Promise<string> {
-      return invoke<string>('get_default_workspace');
+      return normalizePath(await invoke<string>('get_default_workspace'));
     },
 
     async pickDirectory(): Promise<string | null> {
@@ -72,7 +73,7 @@ function createTauriFs(): TauriFs {
         title: 'Select directory to import',
       });
       if (typeof selected === 'string' && selected.length > 0) {
-        return selected;
+        return normalizePath(selected);
       }
       return null;
     },
@@ -84,7 +85,7 @@ function createTauriFs(): TauriFs {
         filters: [{ name: 'HTTP files', extensions: ['http', 'rest', 'txt'] }],
       });
       if (typeof selected === 'string' && selected.length > 0) {
-        return selected;
+        return normalizePath(selected);
       }
       return null;
     },

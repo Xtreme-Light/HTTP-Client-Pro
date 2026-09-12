@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { useRequestStore } from './request';
+import { normalizePath } from '../lib/path';
 
 export interface WorkspaceRoot {
   id: string;
@@ -100,28 +101,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   /** 打开文件到标签页（若已存在则激活，否则新建标签） */
   function openFile(path: string, name: string, content: string) {
     const requestStore = useRequestStore();
-    const existing = tabs.value.find((t) => t.path === path);
+    const key = normalizePath(path);
+    const existing = tabs.value.find((t) => t.path === key);
     if (existing) {
-      activeTabPath.value = path;
+      activeTabPath.value = key;
       // 无未保存修改时采用传入的最新内容（如「另存为」覆盖已打开的文件），
       // 有未保存修改时保留编辑中的内容，避免被覆盖丢失。
       if (!existing.isDirty) existing.content = content;
       requestStore.setSource(existing.content);
       return;
     }
-    tabs.value.push({ path, name, content, isDirty: false, type: 'file' });
-    activeTabPath.value = path;
+    tabs.value.push({ path: key, name, content, isDirty: false, type: 'file' });
+    activeTabPath.value = key;
     requestStore.setSource(content);
-    try { localStorage.setItem(CURRENT_FILE_KEY, path); } catch { /* */ }
+    try { localStorage.setItem(CURRENT_FILE_KEY, key); } catch { /* */ }
   }
 
   /** 关闭标签页，返回新的激活标签（若无则 null） */
   function closeTab(path: string) {
     const requestStore = useRequestStore();
-    const idx = tabs.value.findIndex((t) => t.path === path);
+    const key = normalizePath(path);
+    const idx = tabs.value.findIndex((t) => t.path === key);
     if (idx === -1) return;
     tabs.value.splice(idx, 1);
-    if (activeTabPath.value === path) {
+    if (activeTabPath.value === key) {
       if (tabs.value.length > 0) {
         const newIdx = Math.min(idx, tabs.value.length - 1);
         activeTabPath.value = tabs.value[newIdx].path;
@@ -137,11 +140,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   /** 切换激活标签页 */
   function switchTab(path: string) {
     const requestStore = useRequestStore();
-    const tab = tabs.value.find((t) => t.path === path);
+    const key = normalizePath(path);
+    const tab = tabs.value.find((t) => t.path === key);
     if (!tab) return;
-    activeTabPath.value = path;
+    activeTabPath.value = key;
     requestStore.setSource(tab.content);
-    try { localStorage.setItem(CURRENT_FILE_KEY, path); } catch { /* */ }
+    try { localStorage.setItem(CURRENT_FILE_KEY, key); } catch { /* */ }
   }
 
   /** 更新当前激活标签页的内容 */
