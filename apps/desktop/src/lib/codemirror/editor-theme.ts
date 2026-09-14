@@ -99,6 +99,10 @@ export function buildEditorTheme(scheme: EditorScheme): Extension {
       backgroundColor: s.requestLineBg,
       fontWeight: '500',
     },
+    // 请求体区域底色 — 与请求行/头部区分（装饰见 extensions.ts::bodyDecoration）
+    '.cm-body-line': {
+      backgroundColor: s.bodyBg,
+    },
     // 当前激活块 — 左侧竖线（JetBrains 风格）
     '.cm-active-block': {
       borderLeft: `2px solid ${scheme.accent}`,

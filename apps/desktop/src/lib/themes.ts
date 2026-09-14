@@ -109,6 +109,8 @@ export interface EditorSchemeSyntax {
   body: string;
   blockBorder: string;
   requestLineBg: string;
+  /** 请求体区域行底色 — 与 requestLineBg 区分，突出 body 部分 */
+  bodyBg: string;
 }
 
 export interface EditorScheme {
@@ -670,6 +672,7 @@ export const EDITOR_SCHEMES: EditorScheme[] = [
       body: '#d4d4d4',
       blockBorder: '#333333',
       requestLineBg: '#252526',
+      bodyBg: '#242424',
     },
   },
   {
@@ -702,6 +705,7 @@ export const EDITOR_SCHEMES: EditorScheme[] = [
       body: '#1f1f1f',
       blockBorder: '#dddddd',
       requestLineBg: '#f3f3f3',
+      bodyBg: '#f7f7f7',
     },
   },
   {
@@ -734,6 +738,7 @@ export const EDITOR_SCHEMES: EditorScheme[] = [
       body: '#f8f8f2',
       blockBorder: '#44475a',
       requestLineBg: '#32344a',
+      bodyBg: '#2f3140',
     },
   },
   {
@@ -766,6 +771,7 @@ export const EDITOR_SCHEMES: EditorScheme[] = [
       body: '#f8f8f2',
       blockBorder: '#49483e',
       requestLineBg: '#2e2f28',
+      bodyBg: '#2f302a',
     },
   },
   {
@@ -798,6 +804,7 @@ export const EDITOR_SCHEMES: EditorScheme[] = [
       body: '#657b83',
       blockBorder: '#eee8d5',
       requestLineBg: '#f5eedb',
+      bodyBg: '#f7f0dc',
     },
   },
   {
@@ -830,6 +837,7 @@ export const EDITOR_SCHEMES: EditorScheme[] = [
       body: '#d8dee9',
       blockBorder: '#3b4252',
       requestLineBg: '#3b4252',
+      bodyBg: '#353b49',
     },
   },
   {
@@ -862,6 +870,7 @@ export const EDITOR_SCHEMES: EditorScheme[] = [
       body: '#1f2328',
       blockBorder: '#d0d7de',
       requestLineBg: '#f6f8fa',
+      bodyBg: '#eff2f5',
     },
   },
   {
@@ -894,6 +903,7 @@ export const EDITOR_SCHEMES: EditorScheme[] = [
       body: '#e6edf3',
       blockBorder: '#30363d',
       requestLineBg: '#161b22',
+      bodyBg: '#12181f',
     },
   },
   {
@@ -926,6 +936,7 @@ export const EDITOR_SCHEMES: EditorScheme[] = [
       body: '#abb2bf',
       blockBorder: '#3e4451',
       requestLineBg: '#2c313a',
+      bodyBg: '#22262c',
     },
   },
 ];

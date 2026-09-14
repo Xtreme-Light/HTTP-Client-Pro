@@ -8,6 +8,7 @@ import { EditorState, Range, RangeSet } from '@codemirror/state';
 import { httpTags, httpLanguage } from './lang-http';
 import { looksLikeCurl, curlToHttp, composeCurlPasteInsertion } from './curl-to-http';
 import { httpCompletion, type CompletionDeps } from './completions';
+import { findBodyRegions } from './format';
 import { getRunStatus, type RunStatus } from './run-status';
 
 /** 高亮样式 — 每个 tag 对应一个 CSS class */
@@ -156,6 +157,49 @@ export function blockDecoration() {
           }
         }
 
+        return Decoration.set(decorations, true);
+      }
+    },
+    {
+      decorations: (v) => v.decorations,
+    },
+  );
+}
+
+/**
+ * 请求体底色插件 — 为每个请求块的 body 行添加行装饰（cm-body-line），
+ * 底色来自当前编辑器 Color Scheme（见 editor-theme.ts / themes.ts 的 bodyBg），
+ * 便于与请求行、头部区分。区域识别见 format.ts::findBodyRegions。
+ */
+export function bodyDecoration() {
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+
+      constructor(view: EditorView) {
+        this.decorations = this.build(view);
+      }
+
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.viewportChanged) {
+          this.decorations = this.build(update.view);
+        }
+      }
+
+      build(view: EditorView): DecorationSet {
+        const doc = view.state.doc;
+        const lines: string[] = [];
+        for (let i = 1; i <= doc.lines; i++) lines.push(doc.line(i).text);
+
+        const decorations: Range<Decoration>[] = [];
+        for (const region of findBodyRegions(lines)) {
+          // region 行号为 0-based，CodeMirror 行号 1-based
+          for (let i = region.startLine; i <= region.endLine; i++) {
+            decorations.push(
+              Decoration.line({ class: 'cm-body-line' }).range(doc.line(i + 1).from),
+            );
+          }
+        }
         return Decoration.set(decorations, true);
       }
     },
@@ -319,6 +363,7 @@ export function httpExtensions(
     curlPasteSupport(),
     variableDecoration(checkDefined),
     blockDecoration(),
+    bodyDecoration(),
     activeBlockDecoration(),
     httpCompletion(completionDeps),
   ];

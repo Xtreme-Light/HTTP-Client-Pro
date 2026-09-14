@@ -179,6 +179,10 @@ function bindingParts(binding: string): string[] {
                 <span :style="{ color: currentScheme.syntax.url }">https://api.example.com/users</span>
                 <span :style="{ color: currentScheme.syntax.headerName }">Content-Type</span><span :style="{ color: currentScheme.syntax.separator }">: </span><span :style="{ color: currentScheme.syntax.headerValue }">application/json</span>
                 <span :style="{ color: currentScheme.syntax.comment }"># {{ currentScheme.name }}</span>
+                <span
+                  class="scheme-body"
+                  :style="{ background: currentScheme.syntax.bodyBg, color: currentScheme.syntax.body }"
+                >{"id": 1}</span>
               </div>
               <p class="field-hint">
                 选择「跟随主题」时，编辑器配色随 UI 主题自动切换；也可独立指定。
@@ -607,6 +611,12 @@ function bindingParts(binding: string): string[] {
   flex-wrap: wrap;
   white-space: nowrap;
   overflow: hidden;
+}
+
+/* 预览请求体底色（对应编辑器 .cm-body-line） */
+.scheme-body {
+  padding: 0 6px;
+  border-radius: 3px;
 }
 
 /* ---------- 字体预览 ---------- */
