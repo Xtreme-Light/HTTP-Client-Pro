@@ -15,6 +15,7 @@ import { targetsOf } from '../lib/codemirror/completions';
 import { buildEditorTheme } from '../lib/codemirror/editor-theme';
 import { clearRunStatuses, onRunStatusChange } from '../lib/codemirror/run-status';
 import { blockToCurl } from '../lib/codemirror/http-to-curl';
+import { formatDocumentCommand } from '../lib/codemirror/format';
 import { getKeymapScheme } from '../lib/keymaps';
 import { getFs } from '../lib/backend/fs';
 
@@ -151,7 +152,7 @@ watch(ctxMenu, (open) => {
   }
 });
 
-// 按当前快捷键方案构建应用级编辑器绑定（运行/保存）
+// 按当前快捷键方案构建应用级编辑器绑定（运行/保存/格式化）
 function buildAppKeymap() {
   const bindings = getKeymapScheme(settings.keymapScheme).bindings;
   return keymap.of([
@@ -163,6 +164,11 @@ function buildAppKeymap() {
       key: bindings.save,
       preventDefault: true,
       run: () => { saveCurrentFile(); return true; },
+    },
+    {
+      key: bindings.formatDocument,
+      preventDefault: true,
+      run: (v) => formatDocumentCommand(v),
     },
   ]);
 }

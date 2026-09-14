@@ -19,6 +19,7 @@ export type ShortcutAction =
   | 'undo'
   | 'redo'
   | 'find'
+  | 'formatDocument'
   | 'zoomIn'
   | 'zoomOut'
   | 'resetZoom';
@@ -45,6 +46,7 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: 'resetZoom', label: '重置缩放', group: '视图' },
   { id: 'undo', label: '撤销', group: '编辑' },
   { id: 'redo', label: '重做', group: '编辑' },
+  { id: 'formatDocument', label: '格式化请求体', group: '编辑' },
 ];
 
 /** 一套快捷键方案的全部绑定（CodeMirror 格式） */
@@ -70,6 +72,7 @@ const windowsBindings: KeymapBindings = {
   undo: 'Mod-z',
   redo: 'Mod-y',
   find: 'Mod-f',
+  formatDocument: 'Mod-Alt-l',
   zoomIn: 'Mod-=',
   zoomOut: 'Mod--',
   resetZoom: 'Mod-0',
@@ -80,6 +83,7 @@ const vscodeBindings: KeymapBindings = {
   ...windowsBindings,
   runRequest: 'Mod-Alt-r',
   redo: 'Mod-Shift-z',
+  formatDocument: 'Shift-Alt-f',
 };
 
 /** JetBrains（IntelliJ IDEA）风格 */
