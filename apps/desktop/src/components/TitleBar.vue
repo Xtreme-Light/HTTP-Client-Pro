@@ -6,6 +6,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 const emit = defineEmits<{
   (e: 'toggle-sidebar'): void;
   (e: 'open-settings'): void;
+  (e: 'check-updates'): void;
 }>();
 
 const props = defineProps<{
@@ -50,8 +51,21 @@ onMounted(() => {
       </button>
     </div>
 
-    <!-- 右侧：设置 + 窗口控制 -->
+    <!-- 右侧：检查更新 + 设置 + 窗口控制 -->
     <div class="titlebar-right">
+      <!-- 检查更新按钮 -->
+      <button
+        class="titlebar-btn"
+        title="检查更新"
+        @click="emit('check-updates')"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+          <path d="M13.5 1.5v3h-3" />
+          <path d="M8 5.8v3l1.8 1.2" />
+        </svg>
+      </button>
+
       <!-- 设置按钮：直接打开设置标签页 -->
       <button
         class="titlebar-btn"

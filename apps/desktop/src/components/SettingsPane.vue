@@ -11,6 +11,13 @@ import {
 } from '../lib/themes';
 import { KEYMAP_SCHEME_LIST, SHORTCUT_ACTIONS, formatBinding, getKeymapScheme } from '../lib/keymaps';
 import { SYSTEM_FONTS, buildUiFontStack, isFontAvailable } from '../lib/fonts';
+import {
+  UPDATE_SOURCE_LABELS,
+  fetchChangelog,
+  getAppVersion,
+  type ChangelogEntry,
+  type UpdateSource,
+} from '../lib/updates';
 
 const workspaceStore = useWorkspaceStore();
 const settings = useSettingsStore();
@@ -130,6 +137,37 @@ const currentKeymap = computed(() => getKeymapScheme(settings.keymapScheme));
 function bindingParts(binding: string): string[] {
   return formatBinding(binding).split('+');
 }
+
+/* ---------------- 关于我们：版本 / 更新源 / 更新日志 ---------------- */
+
+const appVersion = ref('');
+const changelog = ref<ChangelogEntry[]>([]);
+const changelogLoading = ref(false);
+const changelogError = ref('');
+
+const updateSourceOptions: { value: UpdateSource; label: string }[] = [
+  { value: 'github', label: UPDATE_SOURCE_LABELS.github },
+  { value: 'cnb', label: UPDATE_SOURCE_LABELS.cnb },
+];
+
+async function loadAbout() {
+  appVersion.value = await getAppVersion().catch(() => '未知');
+  await loadChangelog();
+}
+
+async function loadChangelog() {
+  changelogLoading.value = true;
+  changelogError.value = '';
+  try {
+    changelog.value = await fetchChangelog();
+  } catch (e) {
+    changelogError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    changelogLoading.value = false;
+  }
+}
+
+onMounted(loadAbout);
 </script>
 
 <template>
@@ -332,7 +370,53 @@ function bindingParts(binding: string): string[] {
         <!-- ============ 关于 ============ -->
         <div v-else-if="activeMenu === 'about'" class="settings-section">
           <h3>关于我们</h3>
-          <p class="placeholder">HTTP Client Pro</p>
+
+          <div class="settings-grid">
+            <div class="field col-6">
+              <label class="field-label">应用信息</label>
+              <div class="about-app">
+                <div class="about-name">HTTP Client Pro</div>
+                <div class="about-version">版本 v{{ appVersion || '…' }}</div>
+              </div>
+            </div>
+
+            <div class="field col-6">
+              <label class="field-label">更新下载源</label>
+              <select v-model="settings.updateSource" class="select">
+                <option v-for="o in updateSourceOptions" :key="o.value" :value="o.value">
+                  {{ o.label }}
+                </option>
+              </select>
+              <p class="field-hint">
+                国内下载：如果 GitHub 下载较慢，可切换为 CNB 镜像下载桌面端安装包。
+              </p>
+            </div>
+
+            <div class="field col-12">
+              <div class="changelog-header">
+                <label class="field-label">更新日志</label>
+                <button class="changelog-refresh" :disabled="changelogLoading" @click="loadChangelog">
+                  {{ changelogLoading ? '加载中…' : '刷新' }}
+                </button>
+              </div>
+              <div class="changelog-list">
+                <p v-if="changelogError" class="changelog-empty">
+                  更新日志加载失败：{{ changelogError }}
+                </p>
+                <p v-else-if="!changelogLoading && changelog.length === 0" class="changelog-empty">
+                  暂无发布版本
+                </p>
+                <div v-for="entry in changelog" :key="entry.tag" class="changelog-entry">
+                  <div class="changelog-entry-title">
+                    <span class="changelog-tag">{{ entry.tag }}</span>
+                    <span class="changelog-name">{{ entry.name }}</span>
+                    <span v-if="entry.date" class="changelog-date">{{ entry.date }}</span>
+                  </div>
+                  <pre class="changelog-body">{{ entry.body || '（无更新说明）' }}</pre>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -690,6 +774,116 @@ function bindingParts(binding: string): string[] {
 .shortcut-keys .plus {
   color: var(--fg-muted);
   margin: 0 2px;
+}
+
+/* ---------- 关于我们 ---------- */
+.about-app {
+  border: 1px solid var(--border-block);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  padding: 8px 12px;
+}
+
+.about-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.about-version {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-top: 2px;
+}
+
+.changelog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.changelog-header .field-label {
+  margin-bottom: 0;
+}
+
+.changelog-refresh {
+  height: 24px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-button);
+  color: var(--fg-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.changelog-refresh:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+  border-color: var(--bg-button-hover);
+}
+
+.changelog-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.changelog-list {
+  border: 1px solid var(--border-block);
+  border-radius: 4px;
+  background: var(--bg-input-deep);
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 8px 12px;
+}
+
+.changelog-empty {
+  font-size: 13px;
+  color: var(--fg-muted);
+  margin: 4px 0;
+}
+
+.changelog-entry + .changelog-entry {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.changelog-entry-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.changelog-tag {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: ui-monospace, monospace;
+}
+
+.changelog-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.changelog-date {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-left: auto;
+}
+
+.changelog-body {
+  margin: 6px 0 0 0;
+  font-size: 12px;
+  color: var(--fg-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
 }
 
 /* ---------- 底部按钮 ---------- */

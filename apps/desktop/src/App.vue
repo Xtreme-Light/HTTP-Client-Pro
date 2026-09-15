@@ -13,6 +13,13 @@ import { setBackendAdapter, useRunCurrent } from './composables/useRunCurrent';
 import { detectAdapter } from './lib/backend';
 import { getFs } from './lib/backend/fs';
 import { eventMatchesBinding, getKeymapScheme, type ShortcutAction } from './lib/keymaps';
+import {
+  checkUpdate,
+  getIgnoredVersion,
+  isTauri,
+  openReleasePage,
+  type UpdateInfo,
+} from './lib/updates';
 import EditorPane from './components/EditorPane.vue';
 import EditorTabBar from './components/EditorTabBar.vue';
 import SettingsPane from './components/SettingsPane.vue';
@@ -20,6 +27,7 @@ import ResponsePane from './components/ResponsePane.vue';
 import HistoryPanel from './components/HistoryPanel.vue';
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue';
 import TitleBar from './components/TitleBar.vue';
+import UpdateDialog from './components/UpdateDialog.vue';
 
 const requestStore = useRequestStore();
 const historyStore = useHistoryStore();
@@ -48,6 +56,11 @@ onMounted(async () => {
   envStore.load();
   workspaceStore.load();
   requestStore.setSource(requestStore.source);
+
+  // 启动后静默检查更新（跳过已忽略的版本）
+  if (isTauri()) {
+    setTimeout(() => { void checkForUpdates(false); }, 3000);
+  }
 
   const fs = getFs();
   // 优先恢复上次退出现场；恢复失败（首次启动 / 数据损坏）走默认文件初始化
@@ -266,6 +279,44 @@ function resetZoom() {
   void applyZoom();
 }
 
+/* ================= 检查更新 ================= */
+
+const updateInfo = ref<UpdateInfo | null>(null);
+const showUpdateDialog = ref(false);
+const checkingUpdate = ref(false);
+
+/**
+ * 检查更新 — manual=true（标题栏按钮）时始终反馈结果；
+ * 启动静默检查跳过「忽略此版本」记录过的版本。
+ */
+async function checkForUpdates(manual: boolean) {
+  if (checkingUpdate.value) return;
+  checkingUpdate.value = true;
+  try {
+    const info = await checkUpdate(settings.updateSource);
+    if (!info) {
+      if (manual) alert('当前已是最新版本');
+      return;
+    }
+    if (!manual && info.version === getIgnoredVersion()) return;
+    updateInfo.value = info;
+    showUpdateDialog.value = true;
+  } catch (e) {
+    if (manual) {
+      const msg = e instanceof Error ? e.message : String(e);
+      alert(`检查更新失败：${msg}\n\n如 GitHub 访问较慢，可在「设置 → 关于我们」切换为 CNB 镜像源。`);
+    }
+  } finally {
+    checkingUpdate.value = false;
+  }
+}
+
+function onUpdateOpenPage() {
+  void openReleasePage(settings.updateSource).catch((e) => {
+    alert(`打开下载页失败：${e instanceof Error ? e.message : String(e)}`);
+  });
+}
+
 /* ================= 全局快捷键 ================= */
 
 /** 派发编辑器命令（查找 / 撤销 / 重做）给 EditorPane */
@@ -331,6 +382,15 @@ function onGlobalKeydown(e: KeyboardEvent) {
       :sidebar-visible="showSidebar"
       @toggle-sidebar="showSidebar = !showSidebar"
       @open-settings="workspaceStore.openSettings()"
+      @check-updates="checkForUpdates(true)"
+    />
+
+    <!-- 更新弹窗 -->
+    <UpdateDialog
+      v-if="showUpdateDialog && updateInfo"
+      :info="updateInfo"
+      @close="showUpdateDialog = false"
+      @open-page="onUpdateOpenPage"
     />
 
     <!-- Main body: horizontal split — sidebar | center -->

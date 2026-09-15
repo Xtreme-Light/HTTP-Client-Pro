@@ -70,7 +70,12 @@ jobs:
       # src-tauri 是仓库根 Cargo workspace 的成员，产物位于
       # 仓库根目录的 target/release/bundle/
       # （Linux: deb/rpm/appimage；Windows: msi/nsis）。
+      # createUpdaterArtifacts 已开启：需要 TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)
+      # secrets 对更新包签名，产出 *.sig 供 latest.json 使用。
       - name: Build Tauri app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri:build
 
       - name: Upload bundle artifacts
@@ -93,6 +98,53 @@ jobs:
           pattern: http-client-pro-*
           path: artifacts
 
+      # 生成 Tauri updater 静态更新清单 latest.json：
+      # platforms.linux-x86_64 -> AppImage + .sig；windows-x86_64 -> NSIS setup.exe + .sig。
+      - name: Generate latest.json
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'EOF'
+          import datetime
+          import glob
+          import json
+          import os
+          from urllib.parse import quote
+
+          tag = os.environ["TAG"]
+          base = f"https://github.com/Xtreme-Light/HTTP-Client-Pro/releases/download/{tag}"
+
+          def find_one(pattern):
+              matches = glob.glob(f"artifacts/**/{pattern}", recursive=True)
+              return matches[0] if matches else None
+
+          platforms = {}
+          for key, pattern in (
+              ("linux-x86_64", "*.AppImage"),
+              ("windows-x86_64", "*-setup.exe"),
+          ):
+              path = find_one(pattern)
+              if not path:
+                  print(f"warn: no bundle for {key} ({pattern})")
+                  continue
+              with open(path + ".sig", encoding="utf-8") as f:
+                  signature = f.read().strip()
+              platforms[key] = {
+                  "signature": signature,
+                  "url": f"{base}/{quote(os.path.basename(path))}",
+              }
+
+          data = {
+              "version": tag.lstrip("v"),
+              "notes": f"HTTP Client Pro {tag} 发布，详见 GitHub Release 说明。",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "platforms": platforms,
+          }
+          with open("latest.json", "w", encoding="utf-8") as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+          print(json.dumps({k: v["url"] for k, v in platforms.items()}, indent=2))
+          EOF
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -103,3 +155,30 @@ jobs:
             artifacts/**/*.AppImage
             artifacts/**/*.msi
             artifacts/**/*.exe
+            artifacts/**/*.sig
+            latest.json
+
+  # ------------------------------------------------------------------
+  # 可选：同步发布到 CNB 镜像（国内下载源）。
+  # 前置条件（需仓库维护者提供）：
+  #   1. 在 https://cnb.cool 注册账号（微信扫码）并创建组织与仓库，
+  #      仓库路径需与代码中端点一致：Xtreme-Light/HTTP-Client-Pro
+  #      （如不同，请同步修改 main.rs UPDATE_ENDPOINTS、tauri.conf.json、
+  #        src/lib/updates.ts 中的 CNB 地址）；
+  #   2. 在 GitHub Secrets 配置 CNB_TOKEN（CNB 个人访问令牌，
+  #      需 repo 相关权限）；
+  #   3. 将安装包与 latest.json 上传为 CNB Release 附件，
+  #      且 tag 固定包含 "latest"（对应端点
+  #      /-/releases/download/latest/latest.json）。
+  # 具体上传方式（CNB OpenAPI / .cnb.yml attachments 插件）待 CNB
+  # 仓库信息确认后补充。
+  # ------------------------------------------------------------------
+  # sync-cnb:
+  #   needs: release
+  #   if: startsWith(github.ref, 'refs/tags/v')
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Sync artifacts to CNB releases
+  #       env:
+  #         CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+  #       run: echo "TODO: upload artifacts + latest.json to CNB release"

@@ -12,9 +12,132 @@ use http_core::dispatch::Dispatcher;
 use http_core::env::Environment;
 use http_core::model::RequestTarget;
 use http_core::parser;
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use tauri::{Emitter, State};
+use tauri_plugin_updater::UpdaterExt;
+
+/// 更新下载端点 — 官方源（GitHub Releases）与国内镜像（CNB）。
+/// `latest.json` 为 Tauri updater 静态更新清单，由 CI 发布到对应平台。
+const UPDATE_ENDPOINTS: &[(&str, &str)] = &[
+    (
+        "github",
+        "https://github.com/Xtreme-Light/HTTP-Client-Pro/releases/latest/download/latest.json",
+    ),
+    (
+        "cnb",
+        "https://cnb.cool/Xtreme-Light/HTTP-Client-Pro/-/releases/download/latest/latest.json",
+    ),
+];
+
+/// check_update 命中后暂存的更新对象，供 download_and_install_update 使用。
+#[derive(Default)]
+struct PendingUpdate(Mutex<Option<tauri_plugin_updater::Update>>);
+
+/// 返回给前端的更新信息。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    version: String,
+    current_version: String,
+    notes: Option<String>,
+}
+
+/// 按下载源检查更新 — 前端 `checkUpdate(source)` 调用。
+/// source: 'github'（默认）| 'cnb'
+#[tauri::command]
+async fn check_update(
+    app: tauri::AppHandle,
+    source: Option<String>,
+    pending: State<'_, PendingUpdate>,
+) -> Result<Option<UpdateInfo>, String> {
+    let key = source.as_deref().unwrap_or("github");
+    let endpoint = UPDATE_ENDPOINTS
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, url)| *url)
+        .ok_or_else(|| format!("unknown update source: {key}"))?;
+    let url = url::Url::parse(endpoint).map_err(|e| e.to_string())?;
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![url])
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| format!("检查更新失败: {e}"))?;
+    let mut guard = pending.0.lock().map_err(|e| e.to_string())?;
+    match update {
+        Some(update) => {
+            let info = UpdateInfo {
+                version: update.version.clone(),
+                current_version: update.current_version.clone(),
+                notes: update.body.clone(),
+            };
+            *guard = Some(update);
+            Ok(Some(info))
+        }
+        None => {
+            *guard = None;
+            Ok(None)
+        }
+    }
+}
+
+/// 下载并安装暂存的更新 — 进度通过 `update://download-progress` 事件推送，
+/// 完成后自动重启应用。
+#[tauri::command]
+async fn download_and_install_update(
+    app: tauri::AppHandle,
+    pending: State<'_, PendingUpdate>,
+) -> Result<(), String> {
+    let update = pending
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .take()
+        .ok_or_else(|| "没有待安装的更新，请先检查更新".to_string())?;
+    let handle = app.clone();
+    update
+        .download_and_install(
+            |chunk, total| {
+                let _ = handle.emit(
+                    "update://download-progress",
+                    json!({ "chunk": chunk, "total": total }),
+                );
+            },
+            || {}
+        )
+        .await
+        .map_err(|e| format!("下载更新失败: {e}"))?;
+    app.restart();
+}
+
+/// 拉取远端 JSON（GitHub Releases API 等）— 走 Rust 侧规避 webview CORS 限制。
+#[tauri::command]
+async fn fetch_json(url: String) -> Result<Value, String> {
+    if !url.starts_with("https://") {
+        return Err("仅支持 https URL".to_string());
+    }
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .header("User-Agent", "HTTP-Client-Pro")
+        .header("Accept", "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("HTTP {status}"));
+    }
+    resp.json::<Value>().await.map_err(|e| e.to_string())
+}
 
 /// 健康检查 — 前端 `TauriAdapter.health()` 调用。
 #[tauri::command]
@@ -211,6 +334,8 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(PendingUpdate::default())
         .invoke_handler(tauri::generate_handler![
             ping,
             execute_http,
@@ -222,7 +347,10 @@ fn main() {
             create_dir,
             rename_path,
             delete_file,
-            get_default_workspace
+            get_default_workspace,
+            check_update,
+            download_and_install_update,
+            fetch_json
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

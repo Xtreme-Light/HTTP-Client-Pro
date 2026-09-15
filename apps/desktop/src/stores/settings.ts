@@ -13,6 +13,7 @@ import {
 } from '../lib/themes';
 import { DEFAULT_KEYMAP_SCHEME, KEYMAPS, type KeymapSchemeId } from '../lib/keymaps';
 import { buildEditorFontStack, buildUiFontStack } from '../lib/fonts';
+import type { UpdateSource } from '../lib/updates';
 
 const STORAGE_KEY = 'http-client-pro:settings';
 
@@ -22,6 +23,7 @@ export interface SettingsSnapshot {
   uiFont: string;
   uiFontFallback: string;
   keymapScheme: KeymapSchemeId;
+  updateSource: UpdateSource;
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -35,6 +37,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const uiFontFallback = ref('');
   /** 快捷键方案 */
   const keymapScheme = ref<KeymapSchemeId>(DEFAULT_KEYMAP_SCHEME);
+  /** 更新下载源：github（官方）| cnb（国内镜像） */
+  const updateSource = ref<UpdateSource>('github');
 
   const theme = computed<UiTheme>(() => getTheme(themeId.value));
 
@@ -83,6 +87,9 @@ export const useSettingsStore = defineStore('settings', () => {
       if (parsed.keymapScheme && parsed.keymapScheme in KEYMAPS) {
         keymapScheme.value = parsed.keymapScheme;
       }
+      if (parsed.updateSource === 'github' || parsed.updateSource === 'cnb') {
+        updateSource.value = parsed.updateSource;
+      }
     } catch {
       /* ignore */
     }
@@ -103,6 +110,7 @@ export const useSettingsStore = defineStore('settings', () => {
       uiFont: uiFont.value,
       uiFontFallback: uiFontFallback.value,
       keymapScheme: keymapScheme.value,
+      updateSource: updateSource.value,
     };
   }
 
@@ -112,6 +120,7 @@ export const useSettingsStore = defineStore('settings', () => {
     uiFont.value = s.uiFont;
     uiFontFallback.value = s.uiFontFallback;
     keymapScheme.value = s.keymapScheme;
+    updateSource.value = s.updateSource;
   }
 
   /** 应用设置 = 持久化（DOM 已由监听器实时应用，便于预览） */
@@ -128,6 +137,7 @@ export const useSettingsStore = defineStore('settings', () => {
     uiFont,
     uiFontFallback,
     keymapScheme,
+    updateSource,
     theme,
     resolvedEditorScheme,
     uiFontFamily,
