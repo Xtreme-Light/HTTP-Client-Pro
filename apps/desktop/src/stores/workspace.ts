@@ -37,24 +37,29 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   /** 文件系统变更计数 — 工作区树监听它来失效目录缓存 */
   const fsRevision = ref(0);
 
+  /**
+   * 按路径定位标签页下标 — 入参与已存路径两侧都做分隔符规范化。
+   * 只规范化一侧会让历史会话里遗留的反斜杠路径永远匹配不上，
+   * 表现为标签页点关闭没有任何反应。
+   */
+  function indexOfTab(path: string | null): number {
+    if (path === null) return -1;
+    const key = normalizePath(path);
+    return tabs.value.findIndex((t) => normalizePath(t.path) === key);
+  }
+
+  /** 当前激活的标签页 */
+  const activeTab = computed(() => {
+    const idx = indexOfTab(activeTabPath.value);
+    return idx === -1 ? undefined : tabs.value[idx];
+  });
+
   /** 当前激活标签页的路径（向后兼容） */
   const currentFilePath = computed(() => activeTabPath.value);
-  const currentFileName = computed(() => {
-    const tab = tabs.value.find((t) => t.path === activeTabPath.value);
-    return tab?.name ?? null;
-  });
-  const isDirty = computed(() => {
-    const tab = tabs.value.find((t) => t.path === activeTabPath.value);
-    return tab?.isDirty ?? false;
-  });
-  const canSave = computed(() => {
-    const tab = tabs.value.find((t) => t.path === activeTabPath.value);
-    return tab?.type === 'file';
-  });
-  const isSettingsActive = computed(() => {
-    const tab = tabs.value.find((t) => t.path === activeTabPath.value);
-    return tab?.type === 'settings';
-  });
+  const currentFileName = computed(() => activeTab.value?.name ?? null);
+  const isDirty = computed(() => activeTab.value?.isDirty ?? false);
+  const canSave = computed(() => activeTab.value?.type === 'file');
+  const isSettingsActive = computed(() => activeTab.value?.type === 'settings');
 
   function load() {
     try {
@@ -62,7 +67,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          roots.value = parsed.filter((r) => r && typeof r.path === 'string');
+          // 历史数据可能存有反斜杠路径 — 规范化后去重，避免侧栏出现两个同名根目录
+          const normalized = parsed
+            .filter((r) => r && typeof r.path === 'string')
+            .map((r) => ({ ...r, path: normalizePath(r.path) }));
+          const seen = new Set<string>();
+          roots.value = normalized.filter((r) => {
+            if (seen.has(r.path)) return false;
+            seen.add(r.path);
+            return true;
+          });
         }
       }
     } catch { /* */ }
@@ -75,12 +89,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function addRoot(path: string, name?: string, isLinked = false) {
-    const existing = roots.value.find((r) => r.path === path);
+    const key = normalizePath(path);
+    const existing = roots.value.find((r) => normalizePath(r.path) === key);
     if (existing) return existing;
     const root: WorkspaceRoot = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: name || path.split('/').pop() || path,
-      path,
+      name: name || key.split('/').pop() || key,
+      path: key,
       isLinked,
     };
     roots.value.push(root);
@@ -102,8 +117,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function openFile(path: string, name: string, content: string) {
     const requestStore = useRequestStore();
     const key = normalizePath(path);
-    const existing = tabs.value.find((t) => t.path === key);
-    if (existing) {
+    const existingIdx = indexOfTab(key);
+    if (existingIdx !== -1) {
+      const existing = tabs.value[existingIdx];
       activeTabPath.value = key;
       // 无未保存修改时采用传入的最新内容（如「另存为」覆盖已打开的文件），
       // 有未保存修改时保留编辑中的内容，避免被覆盖丢失。
@@ -121,7 +137,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function closeTab(path: string) {
     const requestStore = useRequestStore();
     const key = normalizePath(path);
-    const idx = tabs.value.findIndex((t) => t.path === key);
+    const idx = indexOfTab(key);
     if (idx === -1) return;
     tabs.value.splice(idx, 1);
     if (activeTabPath.value === key) {
@@ -141,7 +157,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function switchTab(path: string) {
     const requestStore = useRequestStore();
     const key = normalizePath(path);
-    const tab = tabs.value.find((t) => t.path === key);
+    const tab = tabs.value[indexOfTab(key)];
     if (!tab) return;
     activeTabPath.value = key;
     requestStore.setSource(tab.content);
@@ -150,29 +166,29 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   /** 更新当前激活标签页的内容 */
   function updateActiveContent(content: string) {
-    const tab = tabs.value.find((t) => t.path === activeTabPath.value);
+    const tab = activeTab.value;
     if (tab) tab.content = content;
   }
 
   function markDirty() {
-    const tab = tabs.value.find((t) => t.path === activeTabPath.value);
+    const tab = activeTab.value;
     if (tab) tab.isDirty = true;
   }
 
   function markClean() {
-    const tab = tabs.value.find((t) => t.path === activeTabPath.value);
+    const tab = activeTab.value;
     if (tab) tab.isDirty = false;
   }
 
   /** 标记指定标签页为已保存 */
   function markTabClean(path: string) {
-    const tab = tabs.value.find((t) => t.path === path);
+    const tab = tabs.value[indexOfTab(path)];
     if (tab) tab.isDirty = false;
   }
 
   /** 获取指定标签页 */
   function getTab(path: string): EditorTab | undefined {
-    return tabs.value.find((t) => t.path === path);
+    return tabs.value[indexOfTab(path)];
   }
 
   /** 打开设置标签页（若已存在则激活，不可重复打开） */
@@ -220,18 +236,29 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       );
       if (restored.length === 0) return false;
 
+      // 旧版本写入的会话可能带有反斜杠/混合分隔符路径，同一文件因此变成两个
+      // 关不掉的标签页。这里统一规范化并按路径合并；有未保存修改的副本优先，
+      // 避免合并时丢失编辑内容。
+      const byPath = new Map<string, EditorTab>();
+      for (const t of restored) {
+        const key = normalizePath(t.path);
+        const kept = byPath.get(key);
+        if (!kept || (t.isDirty && !kept.isDirty)) byPath.set(key, { ...t, path: key });
+      }
+      const merged = [...byPath.values()];
+
       const requestStore = useRequestStore();
-      tabs.value = restored;
-      const active = typeof parsed.activeTabPath === 'string'
-        && restored.some((t) => t.path === parsed.activeTabPath)
-        ? parsed.activeTabPath
-        : restored[0].path;
+      tabs.value = merged;
+      const requested = typeof parsed.activeTabPath === 'string'
+        ? normalizePath(parsed.activeTabPath)
+        : null;
+      const active = requested && byPath.has(requested) ? requested : merged[0].path;
       activeTabPath.value = active;
 
-      const activeTab = restored.find((t) => t.path === active)!;
-      const editorSource = activeTab.type === 'file'
-        ? activeTab.content
-        : restored.find((t) => t.type === 'file')?.content ?? '';
+      const current = byPath.get(active)!;
+      const editorSource = current.type === 'file'
+        ? current.content
+        : merged.find((t) => t.type === 'file')?.content ?? '';
       requestStore.setSource(editorSource);
       return true;
     } catch {
