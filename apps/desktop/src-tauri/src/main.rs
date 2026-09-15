@@ -25,9 +25,13 @@ fn ping() -> String {
 /// 执行 `.http` 源码中的第一个请求 — 前端 `TauriAdapter.execute()` 调用。
 ///
 /// 返回与 http-web `POST /execute` 完全相同的 JSON 形状：
-/// `{ status, headers, body, elapsed_ms, url }`
+/// `{ status, headers, body, elapsed_ms, url, http_version, content_length,
+/// binary, file_name, saved_path }`。
+///
+/// `save_dir` 为二进制响应（文件下载）的落盘目录，前端传入当前 `.http`
+/// 文件所在目录下的 `.http-history`；缺省时落到进程 CWD 的 `.http-history`。
 #[tauri::command]
-async fn execute_http(source: String) -> Result<Value, String> {
+async fn execute_http(source: String, save_dir: Option<String>) -> Result<Value, String> {
     let file = parser::parse_file(&source).map_err(|e| e.to_string())?;
     let req = file
         .requests
@@ -40,15 +44,10 @@ async fn execute_http(source: String) -> Result<Value, String> {
         .send(&req, &env, None)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(json!({
-        "status": res.status,
-        "headers": res.headers.iter()
-            .map(|(n, v)| (n.clone(), Value::from(v.clone())))
-            .collect::<serde_json::Map<String, Value>>(),
-        "body": String::from_utf8_lossy(&res.body).into_owned(),
-        "elapsed_ms": res.elapsed.as_millis() as u64,
-        "url": res.url,
-    }))
+    Ok(http_core::dispatch::response_to_wire(
+        &res,
+        save_dir.as_deref().map(Path::new),
+    ))
 }
 
 /// 将 RequestTarget 转换为可读字符串。

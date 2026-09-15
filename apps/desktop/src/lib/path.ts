@@ -10,3 +10,13 @@
 export function normalizePath(p: string): string {
   return p.replace(/\\/g, '/');
 }
+
+/**
+ * 返回路径的父目录（正斜杠规范化后）。无分隔符时返回空串。
+ * 例：`/ws/a.http` → `/ws`；`C:/ws/a.http` → `C:/ws`。
+ */
+export function dirName(p: string): string {
+  const norm = normalizePath(p);
+  const idx = norm.lastIndexOf('/');
+  return idx <= 0 ? '' : norm.slice(0, idx);
+}

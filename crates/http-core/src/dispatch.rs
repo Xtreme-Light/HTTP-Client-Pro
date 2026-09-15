@@ -11,6 +11,7 @@ use crate::env::{substitute, Environment};
 use crate::error::{CoreError, ErrorKind, Result, Span};
 use crate::execute::{prepare_with, DiskResolver, PreparedRequest};
 use crate::model::{DocTag, OutputRedirect, Request};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -35,6 +36,9 @@ pub struct DispatchResponse {
     /// Final URL after redirects (same as `url` if no redirects). Recorded
     /// for the history UI; not yet used by response handlers.
     pub url: String,
+    /// HTTP version the response was received with (`HTTP/1.1`, `HTTP/2.0`, …).
+    /// Rendered in the console status line.
+    pub http_version: String,
 }
 
 impl DispatchResponse {
@@ -304,6 +308,7 @@ impl Dispatcher {
         let elapsed = start.elapsed();
 
         let status = response.status().as_u16();
+        let http_version = version_label(response.version());
         let headers = response
             .headers()
             .iter()
@@ -318,8 +323,27 @@ impl Dispatcher {
             body,
             elapsed,
             url,
+            http_version,
         })
     }
+}
+
+/// Render a `reqwest::Version` the way it appears on the wire (`HTTP/1.1`).
+fn version_label(v: reqwest::Version) -> String {
+    let label = if v == reqwest::Version::HTTP_09 {
+        "HTTP/0.9"
+    } else if v == reqwest::Version::HTTP_10 {
+        "HTTP/1.0"
+    } else if v == reqwest::Version::HTTP_11 {
+        "HTTP/1.1"
+    } else if v == reqwest::Version::HTTP_2 {
+        "HTTP/2.0"
+    } else if v == reqwest::Version::HTTP_3 {
+        "HTTP/3.0"
+    } else {
+        "HTTP/1.1"
+    };
+    label.to_string()
 }
 
 fn method_to_reqwest(m: &crate::model::Method) -> Result<reqwest::Method> {
@@ -466,4 +490,279 @@ fn unique_path(path: &Path) -> PathBuf {
         }
     }
     path.to_path_buf()
+}
+
+// ---------------------------------------------------------------------------
+// Binary responses: detection, download file name, persistence
+// ---------------------------------------------------------------------------
+
+/// True when a `Content-Type` denotes a textual payload that a console /
+/// response viewer can render inline. Anything else (spreadsheets, PDFs,
+/// archives, images, `application/octet-stream`, …) is treated as a file.
+pub fn is_text_content_type(content_type: &str) -> bool {
+    let mime = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if mime.is_empty() {
+        return false;
+    }
+    if mime.starts_with("text/") || mime.ends_with("+json") || mime.ends_with("+xml") {
+        return true;
+    }
+    matches!(
+        mime.as_str(),
+        "application/json"
+            | "application/xml"
+            | "application/javascript"
+            | "application/ecmascript"
+            | "application/x-www-form-urlencoded"
+            | "application/x-ndjson"
+            | "application/csv"
+            | "application/sql"
+            | "application/graphql"
+            | "application/manifest+json"
+            | "application/x-sh"
+    )
+}
+
+/// Sniff a body when no usable `Content-Type` is present: invalid UTF-8, a NUL
+/// byte or a high share of control characters all mean "not text".
+pub fn body_looks_binary(body: &[u8]) -> bool {
+    if body.is_empty() {
+        return false;
+    }
+    // Sample a char-boundary-safe prefix so a multibyte char split at the cut
+    // is not mistaken for invalid UTF-8.
+    let mut end = body.len().min(8192);
+    // Back off while `end` lands on a UTF-8 continuation byte (0b10xxxxxx) so a
+    // multibyte char split at the cut is not mistaken for invalid UTF-8.
+    while end > 0 && end < body.len() && (body[end] & 0b1100_0000) == 0b1000_0000 {
+        end -= 1;
+    }
+    let sample = &body[..end];
+    if sample.contains(&0) || std::str::from_utf8(sample).is_err() {
+        return true;
+    }
+    let control = sample
+        .iter()
+        .filter(|b| **b < 0x20 && !matches!(**b, b'\t' | b'\n' | b'\r'))
+        .count();
+    control * 100 > sample.len()
+}
+
+/// True when the response payload should be saved as a file instead of being
+/// rendered as text — the JetBrains HTTP Client behaviour for downloads
+/// (`Content-Disposition: attachment`, a non-textual `Content-Type`, or a body
+/// that does not look like text).
+pub fn is_binary_response(resp: &DispatchResponse) -> bool {
+    if let Some(cd) = resp.header("content-disposition") {
+        if cd.to_ascii_lowercase().contains("attachment") {
+            return true;
+        }
+    }
+    match resp.header("content-type") {
+        Some(ct) if !ct.trim().is_empty() => !is_text_content_type(ct),
+        _ => body_looks_binary(&resp.body),
+    }
+}
+
+/// Best-effort download file name for a response:
+/// 1. `Content-Disposition` — RFC 5987 `filename*=utf-8''%E2%80%A6` wins over a
+///    plain `filename="…"`.
+/// 2. The last path segment of the final URL.
+/// 3. `response.<ext>` with `<ext>` guessed from the MIME type.
+///
+/// The name is sanitised: server-supplied values must not be able to escape
+/// the target directory.
+pub fn suggested_file_name(resp: &DispatchResponse) -> String {
+    let candidates = resp
+        .header("content-disposition")
+        .and_then(filename_from_disposition)
+        .into_iter()
+        .chain(file_name_from_url(&resp.url))
+        .map(|name| sanitize_file_name(&name))
+        .find(|name| !name.is_empty());
+    candidates.unwrap_or_else(|| format!("response.{}", extension_for_mime(resp)))
+}
+
+/// Save a binary response body under `dir`, named after
+/// [`suggested_file_name`] with a `-1`, `-2`, … suffix when that name is
+/// already taken (each run keeps its own copy, like JetBrains). `dir` is
+/// created on demand. Returns the path written.
+pub fn save_binary_response(resp: &DispatchResponse, dir: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(dir).map_err(|e| {
+        CoreError::new(
+            ErrorKind::Io,
+            Span::new(0, 0),
+            format!(
+                "failed to create binary response dir `{}`: {e}",
+                dir.display()
+            ),
+        )
+    })?;
+    let path = unique_path(&dir.join(suggested_file_name(resp)));
+    std::fs::write(&path, &resp.body).map_err(|e| {
+        CoreError::new(
+            ErrorKind::Io,
+            Span::new(0, 0),
+            format!(
+                "failed to save binary response `{}`: {e}",
+                path.display()
+            ),
+        )
+    })?;
+    Ok(path)
+}
+
+/// Extract the file name from a `Content-Disposition` header value.
+fn filename_from_disposition(value: &str) -> Option<String> {
+    let mut plain = None;
+    for part in value.split(';') {
+        let Some((key, raw)) = part.trim().split_once('=') else {
+            continue;
+        };
+        let raw = raw.trim().trim_matches('"');
+        if raw.is_empty() {
+            continue;
+        }
+        match key.trim().to_ascii_lowercase().as_str() {
+            // RFC 5987 extended parameter: `charset'language'percent-encoded`.
+            "filename*" => {
+                let encoded = raw.splitn(2, "''").nth(1).unwrap_or(raw);
+                return Some(
+                    percent_encoding::percent_decode_str(encoded)
+                        .decode_utf8_lossy()
+                        .into_owned(),
+                );
+            }
+            "filename" if plain.is_none() => plain = Some(raw.to_string()),
+            _ => {}
+        }
+    }
+    plain
+}
+
+/// Last path segment of a URL, percent-decoded (`…/a/report.xlsx?x=1`).
+fn file_name_from_url(url: &str) -> Option<String> {
+    let bare = url.split(['?', '#']).next().unwrap_or(url);
+    let last = bare.rsplit('/').next()?.trim();
+    if last.is_empty() {
+        return None;
+    }
+    Some(
+        percent_encoding::percent_decode_str(last)
+            .decode_utf8_lossy()
+            .into_owned(),
+    )
+}
+
+/// Reduce a server-supplied name to a single safe path component. Returns an
+/// empty string when nothing usable is left.
+fn sanitize_file_name(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let cleaned: String = base
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '|' | '?') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    // Trailing dots/spaces are invalid on Windows; a bare "." escapes nothing
+    // but is not a file name either.
+    let cleaned = cleaned.trim_matches(|c| c == '.' || c == ' ').to_string();
+    if cleaned.is_empty() || cleaned.starts_with('.') {
+        String::new()
+    } else {
+        cleaned
+    }
+}
+
+/// File extension for a MIME type, used when neither `Content-Disposition` nor
+/// the URL yields a name.
+fn extension_for_mime(resp: &DispatchResponse) -> &'static str {
+    let mime = resp
+        .header("content-type")
+        .map(|ct| ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    match mime.as_str() {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "xlsx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "docx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => "pptx",
+        "application/vnd.ms-excel" => "xls",
+        "application/pdf" => "pdf",
+        "application/zip" => "zip",
+        "application/gzip" | "application/x-gzip" => "gz",
+        "application/json" => "json",
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        "text/csv" => "csv",
+        "text/plain" => "txt",
+        "text/html" => "html",
+        _ => "bin",
+    }
+}
+
+/// Build the JSON payload sent over the wire (Tauri IPC / http-web REST /
+/// SSE). Text responses inline their body; binary responses (a download) are
+/// written under `save_dir` — defaulting to `.http-history` in the process CWD
+/// — and described by `binary` / `file_name` / `saved_path` instead of dumping
+/// raw bytes into the console (the JetBrains HTTP Client behaviour).
+///
+/// Shape: `{ status, headers, body, elapsed_ms, url, http_version,
+/// content_length, binary, file_name, saved_path }`.
+pub fn response_to_wire(res: &DispatchResponse, save_dir: Option<&Path>) -> Value {
+    let headers = res
+        .headers
+        .iter()
+        .map(|(n, v)| (n.clone(), Value::from(v.clone())))
+        .collect::<serde_json::Map<String, Value>>();
+
+    let mut obj = serde_json::Map::new();
+    obj.insert("status".into(), json!(res.status));
+    obj.insert("headers".into(), Value::Object(headers));
+    obj.insert("elapsed_ms".into(), json!(res.elapsed.as_millis() as u64));
+    obj.insert("url".into(), json!(res.url));
+    obj.insert("http_version".into(), json!(res.http_version));
+    obj.insert("content_length".into(), json!(res.body.len() as u64));
+
+    if is_binary_response(res) {
+        let dir = save_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(".http-history"));
+        obj.insert("binary".into(), json!(true));
+        match save_binary_response(res, &dir) {
+            Ok(path) => {
+                // Display the de-duplicated name actually written (`a-1.xlsx`).
+                let name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| suggested_file_name(res));
+                obj.insert("file_name".into(), json!(name));
+                obj.insert("saved_path".into(), json!(path.to_string_lossy()));
+            }
+            Err(e) => {
+                obj.insert("file_name".into(), json!(suggested_file_name(res)));
+                obj.insert("saved_path".into(), Value::Null);
+                obj.insert("save_error".into(), json!(e.to_string()));
+            }
+        }
+        // Never inline raw download bytes.
+        obj.insert("body".into(), json!(""));
+    } else {
+        obj.insert("binary".into(), json!(false));
+        obj.insert("file_name".into(), Value::Null);
+        obj.insert("saved_path".into(), Value::Null);
+        obj.insert("body".into(), json!(String::from_utf8_lossy(&res.body)));
+    }
+
+    Value::Object(obj)
 }

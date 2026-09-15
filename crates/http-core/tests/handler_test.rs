@@ -27,6 +27,7 @@ fn sample_response(status: u16, body: &[u8], content_type: Option<&str>) -> Disp
         body: body.to_vec(),
         elapsed: Duration::default(),
         url: "http://example.com".to_string(),
+        http_version: "HTTP/1.1".to_string(),
     }
 }
 

@@ -3,7 +3,7 @@ import { TauriAdapter } from './tauri';
 import type { DispatchResponse } from '../../types/http';
 
 describe('TauriAdapter', () => {
-  it('execute() calls invoke("execute_http", { source })', async () => {
+  it('execute() calls invoke("execute_http", { source, saveDir })', async () => {
     const invoke = vi.fn();
     const sample: DispatchResponse = {
       status: 200, headers: {}, body: 'ok', elapsed_ms: 5, url: 'u',
@@ -12,7 +12,19 @@ describe('TauriAdapter', () => {
     const a = new TauriAdapter({ invoke });
     const res = await a.execute('GET /a\n');
     expect(res).toEqual(sample);
-    expect(invoke).toHaveBeenCalledWith('execute_http', { source: 'GET /a\n' });
+    expect(invoke).toHaveBeenCalledWith('execute_http', { source: 'GET /a\n', saveDir: null });
+  });
+
+  it('execute() forwards saveDir when provided', async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      status: 200, headers: {}, body: '', elapsed_ms: 1, url: 'u',
+    });
+    const a = new TauriAdapter({ invoke });
+    await a.execute('GET /a\n', { saveDir: '/ws/.http-history' });
+    expect(invoke).toHaveBeenCalledWith('execute_http', {
+      source: 'GET /a\n',
+      saveDir: '/ws/.http-history',
+    });
   });
 
   it('health() returns true when invoke succeeds', async () => {

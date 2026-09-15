@@ -5,7 +5,10 @@
 //! parsed `.http` requests against it. They exercise the full pipeline:
 //! parse → prepare (with file refs resolved) → reqwest dispatch → capture.
 
-use http_core::dispatch::{write_output_redirect, DispatchResponse, Dispatcher, SendOptions};
+use http_core::dispatch::{
+    is_binary_response, response_to_wire, save_binary_response, suggested_file_name,
+    write_output_redirect, DispatchResponse, Dispatcher, SendOptions,
+};
 use http_core::env::Environment;
 use http_core::model::OutputRedirect;
 use http_core::parser::parse_file;
@@ -513,6 +516,7 @@ fn resp_of(body: &[u8]) -> DispatchResponse {
         body: body.to_vec(),
         elapsed: Duration::ZERO,
         url: "https://x.test/api".into(),
+        http_version: "HTTP/1.1".into(),
     }
 }
 
@@ -553,4 +557,178 @@ async fn output_redirect_substitutes_env_and_creates_dirs() {
     let written = write_output_redirect(&resp_of(b"body"), &redirect, &env, None).unwrap();
     assert_eq!(written, tmp.path().join(".http-history").join("nested").join("r.json"));
     assert_eq!(std::fs::read(&written).unwrap(), b"body");
+}
+
+// --- Binary responses: detection, download file name, persistence ---
+
+/// Response with explicit headers, mirroring a file download.
+fn resp_with(headers: &[(&str, &str)], body: &[u8]) -> DispatchResponse {
+    DispatchResponse {
+        status: 200,
+        headers: headers
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.to_string()))
+            .collect(),
+        body: body.to_vec(),
+        elapsed: Duration::ZERO,
+        url: "https://x.test/api/arch/business/import".into(),
+        http_version: "HTTP/1.1".into(),
+    }
+}
+
+const XLSX_MIME: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=utf-8";
+
+#[test]
+fn attachment_disposition_is_binary_and_names_the_file_from_rfc5987() {
+    let res = resp_with(
+        &[
+            (
+                "Content-disposition",
+                "attachment;filename*=utf-8''%E9%94%99%E8%AF%AF%E4%BF%A1%E6%81%AF.xlsx",
+            ),
+            ("Content-Type", XLSX_MIME),
+        ],
+        b"PK\x03\x04binary",
+    );
+    assert!(is_binary_response(&res));
+    assert_eq!(suggested_file_name(&res), "错误信息.xlsx");
+}
+
+#[test]
+fn spreadsheet_content_type_is_binary_and_falls_back_to_the_url_name() {
+    let res = resp_with(&[("Content-Type", XLSX_MIME)], b"PK\x03\x04");
+    assert!(is_binary_response(&res));
+    assert_eq!(suggested_file_name(&res), "import");
+
+    // No usable name anywhere → MIME-derived extension.
+    let mut nameless = resp_with(&[("Content-Type", XLSX_MIME)], b"PK\x03\x04");
+    nameless.url = "https://x.test/".into();
+    assert_eq!(suggested_file_name(&nameless), "response.xlsx");
+}
+
+#[test]
+fn textual_content_types_are_not_binary() {
+    for ct in [
+        "application/json",
+        "application/json; charset=utf-8",
+        "text/plain",
+        "text/html; charset=UTF-8",
+        "application/problem+json",
+        "application/xml",
+    ] {
+        let res = resp_with(&[("Content-Type", ct)], b"{}");
+        assert!(!is_binary_response(&res), "{ct} should render as text");
+    }
+}
+
+#[test]
+fn missing_content_type_falls_back_to_body_sniffing() {
+    let text = resp_with(&[], b"{\"ok\":true}\n");
+    assert!(!is_binary_response(&text));
+
+    let zipped = resp_with(&[], b"PK\x03\x04\x00\x00\x00\x00");
+    assert!(is_binary_response(&zipped));
+
+    // An empty body is never a file download.
+    assert!(!is_binary_response(&resp_with(&[], b"")));
+}
+
+#[test]
+fn server_supplied_file_name_cannot_escape_the_target_dir() {
+    let res = resp_with(
+        &[("Content-Disposition", "attachment; filename=\"../../../etc/passwd\"")],
+        b"x",
+    );
+    assert_eq!(suggested_file_name(&res), "passwd");
+
+    let mut dots = resp_with(&[("Content-Disposition", "attachment; filename=\"..\"")], b"x");
+    dots.url = "https://x.test/".into(); // no usable URL segment either
+    assert_eq!(suggested_file_name(&dots), "response.bin");
+}
+
+#[test]
+fn save_binary_response_creates_the_dir_and_keeps_every_run() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join(".http-history");
+    let res = resp_with(
+        &[
+            ("Content-Disposition", "attachment; filename=\"错误信息.xlsx\""),
+            ("Content-Type", XLSX_MIME),
+        ],
+        b"PK\x03\x04sheet",
+    );
+
+    let first = save_binary_response(&res, &dir).unwrap();
+    let second = save_binary_response(&res, &dir).unwrap();
+
+    assert_eq!(first, dir.join("错误信息.xlsx"));
+    assert_eq!(second, dir.join("错误信息-1.xlsx"));
+    assert_eq!(std::fs::read(&first).unwrap(), b"PK\x03\x04sheet");
+}
+
+#[tokio::test]
+async fn dispatched_binary_response_is_detected_end_to_end() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method(Method::GET).path("/download");
+        then.status(200)
+            .header("Content-Type", XLSX_MIME)
+            .header(
+                "Content-disposition",
+                "attachment;filename*=utf-8''%E6%8A%A5%E8%A1%A8.xlsx",
+            )
+            .body("PK\u{3}\u{4}bytes");
+    });
+
+    let req = first_req(&format!("GET {}\n", server.url("/download")));
+    let res = Dispatcher::new()
+        .send(&req, &Environment::new(), None)
+        .await
+        .unwrap();
+
+    assert_eq!(res.http_version, "HTTP/1.1");
+    assert!(is_binary_response(&res));
+    assert_eq!(suggested_file_name(&res), "报表.xlsx");
+}
+
+#[test]
+fn response_to_wire_inlines_text_bodies() {
+    let res = resp_with(
+        &[("Content-Type", "application/json")],
+        b"{\"ok\":true}",
+    );
+    let wire = response_to_wire(&res, None);
+    assert_eq!(wire["binary"], serde_json::json!(false));
+    assert_eq!(wire["body"], serde_json::json!("{\"ok\":true}"));
+    assert_eq!(wire["content_length"], serde_json::json!(11));
+    assert_eq!(wire["http_version"], serde_json::json!("HTTP/1.1"));
+    assert!(wire["saved_path"].is_null());
+}
+
+#[test]
+fn response_to_wire_saves_binary_and_reports_the_deduped_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join(".http-history");
+    let res = resp_with(
+        &[
+            ("Content-Disposition", "attachment; filename=\"错误信息.xlsx\""),
+            ("Content-Type", XLSX_MIME),
+        ],
+        b"PK\x03\x04sheet",
+    );
+
+    // Pre-create the target so the second save is de-duplicated (`-5` style).
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("错误信息.xlsx"), b"x").unwrap();
+
+    let wire = response_to_wire(&res, Some(&dir));
+    assert_eq!(wire["binary"], serde_json::json!(true));
+    assert_eq!(wire["body"], serde_json::json!("")); // never inline raw bytes
+    assert_eq!(wire["file_name"], serde_json::json!("错误信息-1.xlsx"));
+    assert_eq!(
+        wire["saved_path"],
+        serde_json::json!(dir.join("错误信息-1.xlsx").to_string_lossy())
+    );
+    assert!(dir.join("错误信息-1.xlsx").exists());
 }

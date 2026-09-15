@@ -4,6 +4,7 @@ import { useHistoryStore } from '../stores/history';
 import { useResponseStore } from '../stores/response';
 import { useSettingsStore } from '../stores/settings';
 import { formatActionBinding } from '../lib/keymaps';
+import { formatConsole } from '../lib/console-format';
 
 const historyStore = useHistoryStore();
 const responseStore = useResponseStore();
@@ -32,32 +33,15 @@ function statusClass(s: number): string {
   return 'status-5xx';
 }
 
-// console 文本：展示完整的请求内容（method + target + headers + body）
+// console 文本：JetBrains 风格（请求行 + 状态行 + 完整响应头 + body/落盘 + 摘要）
 const consoleText = computed(() => {
-  if (!item.value) return '';
-  const lines: string[] = [];
-  lines.push(`${item.value.method} ${item.value.target}`);
-  lines.push('');
-  lines.push(`Status: ${item.value.status}  |  Elapsed: ${item.value.elapsedMs}ms`);
-  lines.push('');
-  if (item.value.response) {
-    const res = item.value.response;
-    lines.push('--- Response ---');
-    lines.push(`Status: ${res.status}  |  Elapsed: ${res.elapsed_ms}ms  |  URL: ${res.url}`);
-    lines.push('');
-    const headers = res.headers ?? {};
-    const ct = (headers['content-type'] ?? headers['Content-Type'] ?? '');
-    if (ct.toLowerCase().includes('json')) {
-      try {
-        lines.push(JSON.stringify(JSON.parse(res.body), null, 2));
-      } catch {
-        lines.push(res.body);
-      }
-    } else {
-      lines.push(res.body);
-    }
-  }
-  return lines.join('\n');
+  const it = item.value;
+  if (!it) return '';
+  return formatConsole({
+    method: it.method,
+    target: it.target,
+    response: it.response,
+  });
 });
 
 // request 文本：展示历史请求的 Editor 源码

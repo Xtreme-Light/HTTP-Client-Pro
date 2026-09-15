@@ -11,8 +11,10 @@
 import { useRequestStore } from '../stores/request';
 import { useResponseStore } from '../stores/response';
 import { useHistoryStore } from '../stores/history';
+import { useWorkspaceStore } from '../stores/workspace';
 import { detectAdapter } from '../lib/backend';
 import { setRunStatus } from '../lib/codemirror/run-status';
+import { dirName } from '../lib/path';
 import type { Block } from '../lib/parse';
 import type { BackendAdapter } from '../types/http';
 
@@ -45,6 +47,13 @@ export function useRunCurrent() {
   const requestStore = useRequestStore();
   const responseStore = useResponseStore();
   const historyStore = useHistoryStore();
+  const workspaceStore = useWorkspaceStore();
+
+  /** 二进制响应落盘目录：当前 `.http` 文件同级的 `.http-history`。 */
+  function saveDir(): string | undefined {
+    const dir = workspaceStore.currentFilePath ? dirName(workspaceStore.currentFilePath) : '';
+    return dir ? `${dir}/.http-history` : undefined;
+  }
 
   async function run(blockIndex?: number) {
     const block = blockIndex != null
@@ -73,7 +82,7 @@ export function useRunCurrent() {
     if (runLine != null) setRunStatus(runLine, 'running');
     responseStore.start();
     try {
-      const res = await adapter.execute(slice);
+      const res = await adapter.execute(slice, { saveDir: saveDir() });
       responseStore.ok(res);
       if (runLine != null) setRunStatus(runLine, 'done');
       historyStore.add({
@@ -102,7 +111,7 @@ export function useRunCurrent() {
 
     responseStore.start();
     try {
-      const res = await adapter.execute(source);
+      const res = await adapter.execute(source, { saveDir: saveDir() });
       responseStore.ok(res);
       historyStore.add({
         method,

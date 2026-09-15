@@ -31,9 +31,14 @@ export class HttpAdapter implements BackendAdapter {
   }
 
   async execute(source: string, opts?: ExecuteOptions): Promise<DispatchResponse> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/plain',
+      ...this.authHeaders(),
+    };
+    if (opts?.saveDir) headers['X-Save-Dir'] = opts.saveDir;
     const res = await fetch(`${this.baseUrl}/execute`, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain', ...this.authHeaders() },
+      headers,
       body: source,
       signal: opts?.signal,
     });
@@ -46,7 +51,8 @@ export class HttpAdapter implements BackendAdapter {
   }
 
   async *executeStream(source: string, opts?: ExecuteOptions): AsyncIterable<ExecuteEvent> {
-    const url = `${this.baseUrl}/sse/execute?src=${encodeURIComponent(source)}`;
+    let url = `${this.baseUrl}/sse/execute?src=${encodeURIComponent(source)}`;
+    if (opts?.saveDir) url += `&save_dir=${encodeURIComponent(opts.saveDir)}`;
     const res = await fetch(url, {
       headers: this.authHeaders(),
       signal: opts?.signal,

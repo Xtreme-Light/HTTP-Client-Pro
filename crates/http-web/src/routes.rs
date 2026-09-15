@@ -83,20 +83,23 @@ async fn execute(
         .send(&req, &env, None)
         .await
         .map_err(ApiError::Dispatch)?;
-    Ok(axum::Json(json!({
-        "status": res.status,
-        "headers": res.headers.iter()
-            .map(|(n, v)| (n.clone(), serde_json::Value::from(v.clone())))
-            .collect::<serde_json::Map<String, serde_json::Value>>(),
-        "body": String::from_utf8_lossy(&res.body).into_owned(),
-        "elapsed_ms": res.elapsed.as_millis() as u64,
-        "url": res.url,
-    })))
+    // Optional download directory for binary responses; defaults to
+    // `.http-history` in the server CWD (see `response_to_wire`).
+    let save_dir = headers
+        .get("x-save-dir")
+        .and_then(|h| h.to_str().ok())
+        .map(std::path::Path::new);
+    Ok(axum::Json(http_core::dispatch::response_to_wire(
+        &res, save_dir,
+    )))
 }
 
 #[derive(Deserialize)]
 struct SseQuery {
     src: String,
+    /// Optional download directory for binary responses.
+    #[serde(default)]
+    save_dir: Option<String>,
 }
 
 /// `GET /sse/execute?src=<http-source>` — stream execution as SSE events.
@@ -125,19 +128,12 @@ async fn execute_via_sse(
     // learns to surface intermediate progress.
     let stream = async_stream::stream! {
         let env = http_core::env::Environment::new();
+        let save_dir = query.save_dir.as_deref().map(std::path::Path::new);
         match state.dispatcher.send(&req, &env, None).await {
             Ok(res) => {
                 yield Ok(Event::default()
                     .event("done")
-                    .json_data(serde_json::json!({
-                        "status": res.status,
-                        "headers": res.headers.iter()
-                            .map(|(n, v)| (n.clone(), serde_json::Value::from(v.clone())))
-                            .collect::<serde_json::Map<String, serde_json::Value>>(),
-                        "body": String::from_utf8_lossy(&res.body).into_owned(),
-                        "elapsed_ms": res.elapsed.as_millis() as u64,
-                        "url": res.url,
-                    }))
+                    .json_data(http_core::dispatch::response_to_wire(&res, save_dir))
                     .expect("json_data serializable"));
             }
             Err(e) => {
@@ -287,9 +283,14 @@ pub fn openapi_spec() -> serde_json::Value {
                         "headers": { "type": "object" },
                         "body": { "type": "string" },
                         "elapsed_ms": { "type": "integer" },
-                        "url": { "type": "string" }
+                        "url": { "type": "string" },
+                        "http_version": { "type": "string" },
+                        "content_length": { "type": "integer" },
+                        "binary": { "type": "boolean" },
+                        "file_name": { "type": ["string", "null"] },
+                        "saved_path": { "type": ["string", "null"] }
                     },
-                    "required": ["status", "headers", "body", "elapsed_ms", "url"]
+                    "required": ["status", "headers", "body", "elapsed_ms", "url", "http_version", "content_length", "binary"]
                 }
             }
         }

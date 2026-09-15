@@ -26,13 +26,13 @@ export class TauriAdapter implements BackendAdapter {
     }
   }
 
-  async execute(source: string, _opts?: ExecuteOptions): Promise<DispatchResponse> {
-    const res = await this.invokeFn('execute_http', { source });
+  async execute(source: string, opts?: ExecuteOptions): Promise<DispatchResponse> {
+    const res = await this.invokeFn('execute_http', { source, saveDir: opts?.saveDir ?? null });
     return res as DispatchResponse;
   }
 
-  async *executeStream(source: string, _opts?: ExecuteOptions): AsyncIterable<ExecuteEvent> {
-    const res = await this.invokeFn('execute_http', { source });
+  async *executeStream(source: string, opts?: ExecuteOptions): AsyncIterable<ExecuteEvent> {
+    const res = await this.invokeFn('execute_http', { source, saveDir: opts?.saveDir ?? null });
     yield { type: 'done', response: res as DispatchResponse };
   }
 }
