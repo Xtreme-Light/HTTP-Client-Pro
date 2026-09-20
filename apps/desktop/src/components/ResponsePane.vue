@@ -189,7 +189,7 @@ const requestText = computed(() => item.value?.source ?? '');
 .elapsed { font-size: 12px; color: var(--fg-muted); }
 
 .url {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
   font-size: 11px;
   color: var(--fg-muted);
   overflow: hidden;

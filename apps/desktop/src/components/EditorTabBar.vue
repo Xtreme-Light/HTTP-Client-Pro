@@ -15,8 +15,8 @@ function onTabClick(path: string) {
 function onTabClose(path: string) {
   const tab = workspaceStore.getTab(path);
   if (!tab) return;
-  // 设置标签页直接关闭，无需未保存检查
-  if (tab.type === 'settings') {
+  // 设置 / 只读示例标签页直接关闭，无需未保存检查
+  if (tab.type === 'settings' || tab.type === 'example') {
     workspaceStore.closeTab(path);
     return;
   }
@@ -68,10 +68,13 @@ async function onDialogSave() {
         :key="tab.path"
         class="editor-tab"
         :class="{ active: tab.path === workspaceStore.activeTabPath }"
-        :title="tab.type === 'settings' ? '设置' : tab.path"
+        :title="tab.type === 'settings' ? '设置' : tab.type === 'example' ? `${tab.name}（只读示例）` : tab.path"
         @click="onTabClick(tab.path)"
       >
         <span class="tab-name">{{ tab.name }}</span>
+        <svg v-if="tab.type === 'example'" class="tab-readonly" width="10" height="10" viewBox="0 0 12 12" fill="currentColor" aria-label="只读">
+          <path d="M6 1a2.5 2.5 0 0 1 2.5 2.5V5h.5a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h.5V3.5A2.5 2.5 0 0 1 6 1zm1.5 4V3.5a1.5 1.5 0 1 0-3 0V5h3z"/>
+        </svg>
         <span v-if="tab.isDirty" class="tab-dirty">●</span>
         <button class="tab-close" title="Close" @click.stop="onTabClose(tab.path)">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -164,6 +167,11 @@ async function onDialogSave() {
 .tab-dirty {
   color: var(--warning);
   font-size: 10px;
+  flex-shrink: 0;
+}
+
+.tab-readonly {
+  color: var(--fg-muted);
   flex-shrink: 0;
 }
 

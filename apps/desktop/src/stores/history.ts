@@ -7,6 +7,8 @@ export interface HistoryItem {
   ts: number;
   method: string;
   target: string;
+  /** 请求名称 — 来自 `### name`，可能为 null（旧数据也可能没有该字段） */
+  name?: string | null;
   status: number;
   elapsedMs: number;
   source: string;

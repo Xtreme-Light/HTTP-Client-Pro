@@ -114,6 +114,56 @@ describe('curlToHttp', () => {
     expect(out).toContain('X-A:1');
     expect(out.split('\n').some((l) => l === 'X-A:')).toBe(false);
   });
+
+  it('cmd 格式（Chrome "Copy as cURL (cmd)"）：^ 续行 + 双引号 + \\" 转义', () => {
+    const cmd = [
+      'curl "https://example.com/api" ^',
+      '  -H "accept: application/json" ^',
+      '  -H "content-type: application/json" ^',
+      '  --data-raw "{\\"key\\":\\"value\\"}" ^',
+      '  --compressed',
+    ].join('\n');
+    const out = curlToHttp(cmd);
+    expect(out).toContain('POST https://example.com/api');
+    expect(out).toContain('accept: application/json');
+    expect(out).toContain('content-type: application/json');
+    expect(out.endsWith('{"key":"value"}')).toBe(true);
+  });
+
+  it('powershell 格式（Chrome "Copy as cURL (powershell)"）：` 续行 + 双引号', () => {
+    const ps = [
+      'curl "https://example.com/api" `',
+      '  -H "accept: application/json" `',
+      '  -X "PUT" `',
+      '  --data-raw "{\\"a\\":1}" `',
+      '  --compressed',
+    ].join('\n');
+    const out = curlToHttp(ps);
+    expect(out).toContain('PUT https://example.com/api');
+    expect(out).toContain('accept: application/json');
+    expect(out.endsWith('{"a":1}')).toBe(true);
+  });
+
+  it('powershell 双引号内 `" 转义亦可解析', () => {
+    const ps = [
+      'curl "https://example.com/api" `',
+      '  --data-raw "{`"a`":1}"',
+    ].join('\n');
+    const out = curlToHttp(ps);
+    expect(out.endsWith('{"a":1}')).toBe(true);
+  });
+
+  it('cmd 单行（无续行）也能转换', () => {
+    const out = curlToHttp('curl "https://example.com/x" -H "X-A: 1"');
+    expect(out).toContain('GET https://example.com/x');
+    expect(out).toContain('X-A: 1');
+  });
+
+  it('curl.exe 前缀（Windows）可识别', () => {
+    expect(looksLikeCurl('curl.exe "https://example.com"')).toBe(true);
+    const out = curlToHttp('curl.exe "https://example.com"');
+    expect(out).toContain('GET https://example.com');
+  });
 });
 
 describe('composeCurlPasteInsertion', () => {

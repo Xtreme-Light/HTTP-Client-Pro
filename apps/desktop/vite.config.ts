@@ -28,6 +28,18 @@ export default defineConfig({
   server: serverConfig,
   // 防止 Vite 缓存干扰 Tauri 的热重载
   clearScreen: false,
+  // 显式声明 Tauri 相关依赖，冷启动时一次性预构建，
+  // 避免运行中发现新依赖触发 reload 导致 webview 白屏
+  optimizeDeps: {
+    include: [
+      '@tauri-apps/api/core',
+      '@tauri-apps/api/window',
+      '@tauri-apps/api/webviewWindow',
+      '@tauri-apps/api/app',
+      '@tauri-apps/api/event',
+      '@tauri-apps/plugin-dialog',
+    ],
+  },
   test: {
     environment: 'happy-dom',
     globals: true,

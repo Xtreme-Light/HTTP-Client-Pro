@@ -37,9 +37,9 @@ export const SYSTEM_FONTS: SystemFontDef[] = [
   { name: 'Maple Mono', hint: '等宽' },
 ];
 
-/** 未自定义字体时的默认 UI 字体栈 */
+/** 未自定义字体时的默认 UI 字体栈（Maple Mono 优先，缺失时回退系统无衬线） */
 export const DEFAULT_UI_FONT_STACK =
-  "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+  '"Maple Mono", "Maple Mono NF", -apple-system, BlinkMacSystemFont, \'Segoe UI\', system-ui, sans-serif';
 
 /** 未自定义字体时的默认编辑器/等宽字体栈 */
 export const DEFAULT_EDITOR_FONT_STACK =

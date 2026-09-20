@@ -216,7 +216,7 @@ function togglePanel() {
 .var-key {
   width: 100px;
   font-size: 12px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
   color: var(--syn-keyword);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -230,7 +230,7 @@ function togglePanel() {
   border: 1px solid var(--border-strong);
   border-radius: 3px;
   font-size: 12px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
   background: var(--bg-input-deep);
   color: var(--fg);
 }

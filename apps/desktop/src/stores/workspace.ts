@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { useRequestStore } from './request';
 import { normalizePath } from '../lib/path';
+import { getExample } from '../lib/examples';
 
 export interface WorkspaceRoot {
   id: string;
@@ -22,7 +23,7 @@ export interface EditorTab {
   name: string;
   content: string;
   isDirty: boolean;
-  type: 'file' | 'settings';
+  type: 'file' | 'settings' | 'example';
 }
 
 const STORAGE_KEY = 'http-client-pro:workspaces';
@@ -209,11 +210,35 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeTabPath.value = SETTINGS_TAB_PATH;
   }
 
+  /** 打开内置请求示例标签页（只读，若已存在则激活，不参与会话持久化） */
+  function openExample(id: string) {
+    const example = getExample(id);
+    if (!example) return;
+    const requestStore = useRequestStore();
+    const path = `__example_${id}__`;
+    const existing = tabs.value.find((t) => t.path === path);
+    if (existing) {
+      activeTabPath.value = path;
+      requestStore.setSource(existing.content);
+      return;
+    }
+    tabs.value.push({
+      path,
+      name: example.title,
+      content: example.content,
+      isDirty: false,
+      type: 'example',
+    });
+    activeTabPath.value = path;
+    requestStore.setSource(example.content);
+  }
+
   /** 保存当前现场（已打开的标签页及其内容 / 激活标签）— 程序退出时调用 */
   function saveSession() {
     try {
       localStorage.setItem(SESSION_KEY, JSON.stringify({
-        tabs: tabs.value,
+        // 只读示例标签页不持久化（重开成本为零，且避免过期内容残留）
+        tabs: tabs.value.filter((t) => t.type !== 'example'),
         activeTabPath: activeTabPath.value,
       }));
     } catch { /* */ }
@@ -267,11 +292,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   return {
-    roots, tabs, activeTabPath, fsRevision,
+    roots, tabs, activeTabPath, fsRevision, activeTab,
     currentFilePath, currentFileName, isDirty, canSave, isSettingsActive,
     load, persist, addRoot, removeRoot, notifyFsChange,
     openFile, closeTab, switchTab, updateActiveContent,
-    markDirty, markClean, markTabClean, getTab, openSettings,
+    markDirty, markClean, markTabClean, getTab, openSettings, openExample,
     saveSession, restoreSession,
   };
 });

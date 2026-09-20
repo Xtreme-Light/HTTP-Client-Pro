@@ -38,7 +38,7 @@ function onView(item: HistoryItem) {
 
 /** 重放 — 重新发送请求 */
 function onReplay(item: HistoryItem) {
-  replay(item.source, item.method, item.target);
+  replay(item.source, item.method, item.target, item.name ?? null);
 }
 
 function onClear() {
@@ -77,6 +77,7 @@ function onClear() {
             @click.stop="onReplay(item)"
           >&#x21bb;</button>
         </div>
+        <div v-if="item.name" class="item-name">{{ item.name }}</div>
         <div class="item-target">{{ item.target }}</div>
       </div>
     </div>
@@ -208,9 +209,19 @@ function onClear() {
   color: var(--focus);
 }
 
+.item-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 1px;
+}
+
 .item-target {
   font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;

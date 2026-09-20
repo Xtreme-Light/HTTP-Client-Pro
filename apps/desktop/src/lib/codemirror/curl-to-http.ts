@@ -24,8 +24,59 @@ const DATA_OPTIONS = new Set([
 /** 判断文本是否像一个 curl 命令 */
 export function looksLikeCurl(text: string): boolean {
   const t = text.trim();
-  if (!/^curl(\s|$)/.test(t)) return false;
+  if (!/^curl(\.exe)?(\s|$)/i.test(t)) return false;
   return /(?:^|[\s'"`])(--url\b|--header\b|--request\b|--data|-H\b|-X\b|-d\b|-b\b|https?:\/\/)/.test(t);
+}
+
+/**
+ * 拼接换行续行标记 — 支持 Chrome "Copy as cURL" 的三种方言：
+ * - bash:       行尾 `\`
+ * - cmd:        行尾 `^`
+ * - powershell: 行尾 `` ` ``
+ *
+ * 仅识别引号外的续行标记，避免误拼引号字符串内的换行；
+ * 双引号内的 PowerShell 转义 `` `" `` 统一转为 `\"`（交由 shellSplit 处理）。
+ */
+export function joinContinuations(input: string): string {
+  let out = '';
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (inSingle) {
+      if (ch === "'") inSingle = false;
+      out += ch;
+      continue;
+    }
+    if (inDouble) {
+      if (ch === '\\' && i + 1 < input.length) {
+        // 保留 \" \\ 等转义序列，交由 shellSplit 处理
+        out += ch + input[++i];
+        continue;
+      }
+      if (ch === '`' && input[i + 1] === '"') {
+        out += '\\"';
+        i++;
+        continue;
+      }
+      if (ch === '"') inDouble = false;
+      out += ch;
+      continue;
+    }
+    if (ch === "'") { inSingle = true; out += ch; continue; }
+    if (ch === '"') { inDouble = true; out += ch; continue; }
+    if (ch === '\\' || ch === '^' || ch === '`') {
+      // 续行标记：其后（可含行尾空白）紧跟换行
+      const m = /^[ \t]*\n/.exec(input.slice(i + 1));
+      if (m) {
+        i += m[0].length;
+        out += ' ';
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return out;
 }
 
 /**
@@ -162,9 +213,9 @@ export function curlToHttp(text: string): string {
     .map((l) => `# ${l.trimEnd()}`.trimEnd())
     .join('\n');
 
-  // 行尾续行符 `\` 拼接后分词
-  const tokens = shellSplit(normalized.replace(/\\\n/g, ' '));
-  if (tokens.length === 0 || tokens[0] !== 'curl') return comment;
+  // 拼接续行（bash `\` / cmd `^` / powershell `` ` ``）后分词
+  const tokens = shellSplit(joinContinuations(normalized));
+  if (tokens.length === 0 || !/^curl(\.exe)?$/i.test(tokens[0])) return comment;
 
   const parsed = parseCurl(tokens);
   if (!parsed.url) return comment; // 无法提取 URL — 仅保留注释

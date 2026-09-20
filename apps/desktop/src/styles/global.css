@@ -70,8 +70,8 @@
   --syn-tag: #569cd6;
   --syn-attr: #9cdcfe;
 
-  /* UI 字体栈（由设置写入） */
-  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  /* UI 字体栈（由设置写入，默认 Maple Mono 优先） */
+  --font-ui: 'Maple Mono', 'Maple Mono NF', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 
   /* 编辑器 / Console 字体栈（由设置写入，默认内置等宽栈） */
   --font-editor: 'Maple Mono', 'Maple Mono NF', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -91,6 +91,12 @@ html, body {
   font-size: 13px;
   color: var(--fg);
   background: var(--bg-base);
+}
+
+/* 表单控件默认不继承字体（浏览器初始值为系统字体），
+   显式继承才能让 --font-ui 设置对按钮/输入框/下拉框生效 */
+button, input, select, textarea {
+  font-family: inherit;
 }
 
 #app {

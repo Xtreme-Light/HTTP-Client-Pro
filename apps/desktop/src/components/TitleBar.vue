@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { EXAMPLES } from '../lib/examples';
 
 // ---- emit & props 声明（必须在使用前定义）----
 const emit = defineEmits<{
   (e: 'toggle-sidebar'): void;
   (e: 'open-settings'): void;
   (e: 'check-updates'): void;
+  (e: 'open-example', id: string): void;
 }>();
 
 const props = defineProps<{
@@ -15,6 +17,30 @@ const props = defineProps<{
 
 const appWindow = getCurrentWindow();
 const isMaximized = ref(false);
+
+// ---- 请求示例下拉菜单 ----
+const exampleMenuOpen = ref(false);
+const exampleMenuEl = ref<HTMLElement>();
+
+function toggleExampleMenu() {
+  exampleMenuOpen.value = !exampleMenuOpen.value;
+}
+
+function openExample(id: string) {
+  exampleMenuOpen.value = false;
+  emit('open-example', id);
+}
+
+function onDocMouseDown(e: MouseEvent) {
+  if (exampleMenuEl.value && e.target instanceof Node && !exampleMenuEl.value.contains(e.target)) {
+    exampleMenuOpen.value = false;
+  }
+}
+
+watch(exampleMenuOpen, (open) => {
+  if (open) document.addEventListener('mousedown', onDocMouseDown, true);
+  else document.removeEventListener('mousedown', onDocMouseDown, true);
+});
 
 // ---- 窗口控制 ----
 async function minimize() {
@@ -30,6 +56,10 @@ async function close() {
 
 onMounted(() => {
   appWindow.isMaximized().then(v => { isMaximized.value = v; });
+});
+
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocMouseDown, true);
 });
 </script>
 
@@ -65,6 +95,33 @@ onMounted(() => {
           <path d="M8 5.8v3l1.8 1.2" />
         </svg>
       </button>
+
+      <!-- 请求示例按钮：下拉菜单，点击条目以只读标签页打开 -->
+      <div ref="exampleMenuEl" class="example-menu-wrap">
+        <button
+          class="titlebar-btn"
+          title="请求示例"
+          :class="{ active: exampleMenuOpen }"
+          @click="toggleExampleMenu"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 2.5h7L13 5.5v8a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5z" />
+            <path d="M10 2.5V6h3" />
+            <path d="M5.5 9h5M5.5 11.5h3.5" />
+          </svg>
+        </button>
+        <div v-if="exampleMenuOpen" class="example-menu">
+          <div class="example-menu-title">请求示例（只读）</div>
+          <button
+            v-for="ex in EXAMPLES"
+            :key="ex.id"
+            class="example-menu-item"
+            @click="openExample(ex.id)"
+          >
+            {{ ex.title }}
+          </button>
+        </div>
+      </div>
 
       <!-- 设置按钮：直接打开设置标签页 -->
       <button
@@ -180,5 +237,46 @@ onMounted(() => {
 .close-btn:hover {
   background: var(--danger-strong);
   color: var(--fg-strong);
+}
+
+/* ---- 请求示例下拉菜单 ---- */
+.example-menu-wrap {
+  position: relative;
+}
+
+.example-menu {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  min-width: 240px;
+  background: var(--bg-chrome);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px var(--shadow);
+  padding: 4px 0;
+  z-index: 10000;
+}
+
+.example-menu-title {
+  padding: 4px 12px 6px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  user-select: none;
+}
+
+.example-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.example-menu-item:hover {
+  background: var(--bg-hover);
 }
 </style>

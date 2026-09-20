@@ -382,6 +382,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
       :sidebar-visible="showSidebar"
       @toggle-sidebar="showSidebar = !showSidebar"
       @open-settings="workspaceStore.openSettings()"
+      @open-example="workspaceStore.openExample($event)"
       @check-updates="checkForUpdates(true)"
     />
 

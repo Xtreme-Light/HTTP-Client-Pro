@@ -153,7 +153,7 @@ function hasChildren(node: HtmlNode): boolean {
 
 <style scoped>
 .html-tree {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-editor);
   font-size: 13px;
   line-height: 1.6;
   background: var(--bg-input-deep);

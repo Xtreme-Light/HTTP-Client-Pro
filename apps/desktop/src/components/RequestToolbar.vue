@@ -83,7 +83,7 @@ const methodClass = computed(() => {
 .method-unknown { background: var(--chip-neutral-bg); color: var(--chip-neutral-fg); }
 
 .target {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
   font-size: 12px;
   color: var(--fg-muted);
   overflow: hidden;

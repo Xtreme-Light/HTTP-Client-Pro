@@ -163,7 +163,7 @@ async function onInstall() {
   border-radius: 4px;
   background: var(--bg-input);
   color: var(--fg);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
   font-size: 12px;
   line-height: 1.6;
   outline: none;

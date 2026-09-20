@@ -29,11 +29,22 @@ const { run } = useRunCurrent();
 const editorEl = ref<HTMLElement>();
 let view: EditorView | null = null;
 
-// 运行时可重配置：编辑器主题 + 应用快捷键 + 撤销栈 + 执行状态 gutter
+// 运行时可重配置：编辑器主题 + 应用快捷键 + 撤销栈 + 执行状态 gutter + 只读模式
 const themeCompartment = new Compartment();
 const keymapCompartment = new Compartment();
 const historyCompartment = new Compartment();
 const runGutterCompartment = new Compartment();
+const readOnlyCompartment = new Compartment();
+
+/** 当前激活标签是否为只读示例 */
+function isExampleActive(): boolean {
+  return workspaceStore.activeTab?.type === 'example';
+}
+
+/** 构建只读扩展（示例标签页禁止编辑与输入） */
+function buildReadOnlyExt(ro: boolean) {
+  return [EditorState.readOnly.of(ro), EditorView.editable.of(!ro)];
+}
 
 /** 外部同步事务标记（标签页切换 / history replay / 表单编辑）—
  *  不进入撤销栈，也不触发 dirty 标记 */
@@ -64,6 +75,8 @@ function onRunBlock(e: Event) {
 
 // 保存当前文件
 async function saveCurrentFile() {
+  // 只读示例 / 设置标签页不可保存
+  if (!workspaceStore.canSave) return;
   const fs = getFs();
   const path = workspaceStore.currentFilePath;
   if (!fs || !path) return;
@@ -132,6 +145,18 @@ async function copyAsCurl() {
   await copyToClipboard(curl);
 }
 
+/** 复制该 block 的原始文本（按源文件行范围原样截取，不做重新序列化） */
+async function copyRawBlock() {
+  const menu = ctxMenu.value;
+  ctxMenu.value = null;
+  if (!menu) return;
+  const block = requestStore.blocks[menu.blockIndex];
+  if (!block) return;
+  const lines = requestStore.source.split('\n');
+  const raw = lines.slice(block.startLine, block.endLine).join('\n');
+  await copyToClipboard(raw);
+}
+
 function onDocMouseDown(e: MouseEvent) {
   if (!ctxMenu.value) return;
   if (ctxMenuEl.value && e.target instanceof Node && ctxMenuEl.value.contains(e.target)) return;
@@ -168,7 +193,7 @@ function buildAppKeymap() {
     {
       key: bindings.formatDocument,
       preventDefault: true,
-      run: (v) => formatDocumentCommand(v),
+      run: (v) => (isExampleActive() ? true : formatDocumentCommand(v)),
     },
   ]);
 }
@@ -212,6 +237,7 @@ onMounted(() => {
     }),
     runGutterCompartment.of(runGutter()),
     historyCompartment.of(history()),
+    readOnlyCompartment.of(buildReadOnlyExt(isExampleActive())),
     keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
     keymapCompartment.of(buildAppKeymap()),
     EditorView.updateListener.of((update) => {
@@ -221,7 +247,7 @@ onMounted(() => {
         // 文档变更后行号失效 → 清空执行状态徽标
         clearRunStatuses();
       }
-      if (update.docChanged && !isSync) {
+      if (update.docChanged && !isSync && !isExampleActive()) {
         const newSource = update.state.sliceDoc();
         workspaceStore.updateActiveContent(newSource);
         workspaceStore.markDirty();
@@ -322,6 +348,15 @@ watch(
     view?.dispatch({ effects: keymapCompartment.reconfigure(buildAppKeymap()) });
   },
 );
+
+// 激活标签类型变更（普通文件 ↔ 只读示例）→ 重配置只读模式
+watch(
+  () => workspaceStore.activeTab?.type,
+  (type) => {
+    const ro = type === 'example';
+    view?.dispatch({ effects: readOnlyCompartment.reconfigure(buildReadOnlyExt(ro)) });
+  },
+);
 </script>
 
 <template>
@@ -336,6 +371,7 @@ watch(
       :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
       @click.stop
     >
+      <button class="menu-item" @click="copyRawBlock">Copy</button>
       <button class="menu-item" @click="copyAsCurl">Copy as cURL</button>
     </div>
   </div>

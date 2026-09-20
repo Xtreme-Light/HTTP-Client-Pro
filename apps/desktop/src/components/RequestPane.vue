@@ -234,7 +234,7 @@ const queryParams = computed(() => {
   background: var(--bg-input);
   color: var(--fg);
   font-size: 13px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
   outline: none;
 }
 
@@ -317,7 +317,7 @@ const queryParams = computed(() => {
   background: var(--bg-input);
   color: var(--fg);
   font-size: 12px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
 }
 
 .header-value-input {
@@ -328,7 +328,7 @@ const queryParams = computed(() => {
   background: var(--bg-input);
   color: var(--fg);
   font-size: 12px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
 }
 
 .remove-btn {
@@ -368,7 +368,7 @@ const queryParams = computed(() => {
   background: var(--bg-input-deep);
   color: var(--fg);
   font-size: 13px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
   resize: vertical;
   outline: none;
 }
@@ -395,7 +395,7 @@ const queryParams = computed(() => {
 }
 
 .handler-info code {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
   color: var(--syn-url);
   font-size: 12px;
 }
@@ -421,7 +421,7 @@ const queryParams = computed(() => {
   background: var(--bg-panel);
   border-radius: 3px;
   font-size: 12px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
 }
 
 .param-name { color: var(--syn-url); }

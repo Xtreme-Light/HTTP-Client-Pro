@@ -88,6 +88,7 @@ export function useRunCurrent() {
       historyStore.add({
         method: block.method,
         target: block.target,
+        name: block.name ?? null,
         status: res.status,
         elapsedMs: res.elapsed_ms,
         source: slice,
@@ -100,7 +101,7 @@ export function useRunCurrent() {
   }
 
   /** 从历史记录重放（重新发送请求） */
-  async function replay(source: string, method: string, target: string) {
+  async function replay(source: string, method: string, target: string, name?: string | null) {
     let adapter: BackendAdapter;
     try {
       adapter = getAdapter();
@@ -116,6 +117,7 @@ export function useRunCurrent() {
       historyStore.add({
         method,
         target,
+        name: name ?? null,
         status: res.status,
         elapsedMs: res.elapsed_ms,
         source,

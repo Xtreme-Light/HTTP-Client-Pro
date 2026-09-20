@@ -562,7 +562,7 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
   border: 1px solid var(--border-strong);
   border-radius: 4px;
   font-size: 13px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
 }
 
 .modal input:focus {

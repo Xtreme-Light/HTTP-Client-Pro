@@ -688,7 +688,7 @@ onMounted(loadAbout);
   padding: 6px 10px;
   border-radius: 4px;
   border: 1px solid var(--border-block);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
   font-size: 12px;
   display: flex;
   gap: 6px;
@@ -768,7 +768,7 @@ onMounted(loadAbout);
   background: var(--bg-input);
   color: var(--fg);
   font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
 }
 
 .shortcut-keys .plus {
@@ -861,7 +861,7 @@ onMounted(loadAbout);
   font-size: 13px;
   font-weight: 700;
   color: var(--accent);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-editor);
 }
 
 .changelog-name {
