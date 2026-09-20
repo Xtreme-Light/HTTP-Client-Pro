@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import type { FileEntry } from '../../stores/workspace';
 import { normalizePath } from '../path';
 
@@ -14,6 +14,10 @@ export interface TauriFs {
   getDefaultWorkspace(): Promise<string>;
   pickDirectory(): Promise<string | null>;
   pickFile(): Promise<string | null>;
+  /** 在系统文件管理器中定位文件（Windows/macOS 选中文件，Linux 打开所在目录） */
+  revealInDir(path: string): Promise<void>;
+  /** 弹出原生"保存为"对话框，返回完整保存路径（取消返回 null） */
+  pickSavePath(defaultPath?: string): Promise<string | null>;
 }
 
 let _instance: TauriFs | null = null;
@@ -82,6 +86,22 @@ function createTauriFs(): TauriFs {
       const selected = await open({
         multiple: false,
         title: 'Open file',
+        filters: [{ name: 'HTTP files', extensions: ['http', 'rest', 'txt'] }],
+      });
+      if (typeof selected === 'string' && selected.length > 0) {
+        return normalizePath(selected);
+      }
+      return null;
+    },
+
+    async revealInDir(path: string): Promise<void> {
+      await invoke('reveal_in_file_manager', { path });
+    },
+
+    async pickSavePath(defaultPath?: string): Promise<string | null> {
+      const selected = await save({
+        title: '另存为',
+        defaultPath: defaultPath || undefined,
         filters: [{ name: 'HTTP files', extensions: ['http', 'rest', 'txt'] }],
       });
       if (typeof selected === 'string' && selected.length > 0) {

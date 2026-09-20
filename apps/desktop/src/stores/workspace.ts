@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { useRequestStore } from './request';
+import { useSettingsStore } from './settings';
 import { normalizePath } from '../lib/path';
 import { getExample } from '../lib/examples';
 import { getFs } from '../lib/backend/fs';
@@ -25,6 +26,16 @@ export interface EditorTab {
   content: string;
   isDirty: boolean;
   type: 'file' | 'settings' | 'example';
+  /** 打开时间（毫秒时间戳）— 超出最大标签数时按此淘汰最早打开的已保存标签 */
+  openedAt: number;
+  /** 最近修改时间（毫秒时间戳）— 全部未保存时按此挑选淘汰候选 */
+  modifiedAt: number;
+}
+
+/** 容量淘汰待确认状态：新标签超出上限且所有文件标签都有未保存修改时，等待用户决定 */
+export interface PendingEviction {
+  path: string;
+  name: string;
 }
 
 const STORAGE_KEY = 'http-client-pro:workspaces';
@@ -45,6 +56,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeTabPath = ref<string | null>(null);
   /** 文件系统变更计数 — 工作区树监听它来失效目录缓存 */
   const fsRevision = ref(0);
+  /** 容量淘汰待确认（全部标签未保存时由 UI 弹窗询问），null 表示无待确认 */
+  const pendingEviction = ref<PendingEviction | null>(null);
+  /** pendingEviction 的用户决定回调：save=保存后淘汰 discard=放弃修改直接淘汰 cancel=取消打开新标签 */
+  let evictionResolve: ((choice: 'save' | 'discard' | 'cancel') => void) | null = null;
 
   /**
    * 按路径定位标签页下标 — 入参与已存路径两侧都做分隔符规范化。
@@ -122,8 +137,50 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     fsRevision.value++;
   }
 
-  /** 打开文件到标签页（若已存在则激活，否则新建标签） */
-  function openFile(path: string, name: string, content: string) {
+  /**
+   * 超出最大标签数时的淘汰策略：
+   * - 优先淘汰最早打开的已保存（clean）文件标签；
+   * - 若所有文件标签都有未保存修改，则取修改时间最早的标签，
+   *   置 pendingEviction 由 UI 弹窗询问：保存后淘汰 / 放弃修改直接淘汰 / 取消；
+   * - 设置与示例标签不参与淘汰。
+   * 返回 true 表示可以继续打开新标签，false 表示用户取消。
+   */
+  async function ensureTabCapacity(): Promise<boolean> {
+    const settings = useSettingsStore();
+    const max = settings.maxTabs;
+    if (!Number.isFinite(max) || max <= 0) return true;
+    // 淘汰期间新标签尚未入列，达到上限即需要腾位
+    while (tabs.value.length >= max) {
+      const fileTabs = tabs.value.filter((t) => t.type === 'file');
+      if (fileTabs.length === 0) return true;
+      const clean = fileTabs.filter((t) => !t.isDirty);
+      if (clean.length > 0) {
+        const victim = clean.reduce((a, b) => (a.openedAt <= b.openedAt ? a : b));
+        closeTab(victim.path);
+        continue;
+      }
+      // 全部未保存 — 挑修改时间最早的询问用户
+      const victim = fileTabs.reduce((a, b) => (a.modifiedAt <= b.modifiedAt ? a : b));
+      const choice = await new Promise<'save' | 'discard' | 'cancel'>((resolve) => {
+        evictionResolve = resolve;
+        pendingEviction.value = { path: victim.path, name: victim.name };
+      });
+      evictionResolve = null;
+      pendingEviction.value = null;
+      if (choice === 'cancel') return false;
+      // 'save'：UI 已先执行 saveTab（可能原地转正为文件标签），按最新下标关闭
+      closeTab(victim.path);
+    }
+    return true;
+  }
+
+  /** 提交容量淘汰弹窗的用户决定（save / discard 由 UI 完成保存动作后调用；cancel 放弃打开新标签） */
+  function resolveEviction(choice: 'save' | 'discard' | 'cancel') {
+    if (evictionResolve) evictionResolve(choice);
+  }
+
+  /** 打开文件到标签页（若已存在则激活，否则新建标签；超出最大标签数时先淘汰） */
+  async function openFile(path: string, name: string, content: string, opts?: { skipCapacity?: boolean }) {
     const requestStore = useRequestStore();
     const key = normalizePath(path);
     const existingIdx = indexOfTab(key);
@@ -136,7 +193,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       requestStore.setSource(existing.content);
       return;
     }
-    tabs.value.push({ path: key, name, content, isDirty: false, type: 'file' });
+    if (!opts?.skipCapacity) {
+      const ok = await ensureTabCapacity();
+      if (!ok) return;
+    }
+    const now = Date.now();
+    tabs.value.push({ path: key, name, content, isDirty: false, type: 'file', openedAt: now, modifiedAt: now });
     activeTabPath.value = key;
     requestStore.setSource(content);
     try { localStorage.setItem(CURRENT_FILE_KEY, key); } catch { /* */ }
@@ -181,7 +243,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   function markDirty() {
     const tab = activeTab.value;
-    if (tab) tab.isDirty = true;
+    if (tab) {
+      tab.isDirty = true;
+      tab.modifiedAt = Date.now();
+    }
   }
 
   function markClean() {
@@ -214,6 +279,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       content: '',
       isDirty: false,
       type: 'settings',
+      openedAt: Date.now(),
+      modifiedAt: Date.now(),
     });
     activeTabPath.value = SETTINGS_TAB_PATH;
   }
@@ -236,17 +303,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       content: example.content,
       isDirty: false,
       type: 'example',
+      openedAt: Date.now(),
+      modifiedAt: Date.now(),
     });
     activeTabPath.value = path;
     requestStore.setSource(example.content);
   }
 
   /** 新建未命名标签页（Untitled.http）— 保存时写入默认工作区目录 */
-  function createUntitledTab() {
+  async function createUntitledTab() {
     let n = 1;
     while (indexOfTab(`untitled-${n}`) !== -1) n++;
     const path = `untitled-${n}`;
-    openFile(path, n === 1 ? 'Untitled.http' : `Untitled-${n}.http`, '');
+    await openFile(path, n === 1 ? 'Untitled.http' : `Untitled-${n}.http`, '');
   }
 
   /** 默认工作区目录：优先取非软链接的根（Default），否则第一个根，最后回退到后端默认路径 */
@@ -293,8 +362,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const fileName = await uniqueUntitledName(dir, tab.name);
       const fullPath = `${dir}/${fileName}`;
       await fs.writeFile(fullPath, tab.content);
-      // 先打开新文件标签再关闭临时标签，保持激活焦点不跳动
-      openFile(fullPath, fileName, tab.content);
+      // 先打开新文件标签再关闭临时标签，保持激活焦点不跳动；
+      // 转正属于替换而非新增，跳过容量淘汰，避免"保存未命名标签反而挤掉别的标签"
+      await openFile(fullPath, fileName, tab.content, { skipCapacity: true });
       closeTab(tab.path);
       markTabClean(fullPath);
       notifyFsChange();
@@ -342,6 +412,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const byPath = new Map<string, EditorTab>();
       for (const t of restored) {
         const key = normalizePath(t.path);
+        // 旧版本会话没有时间戳字段 — 恢复时补齐（按数组顺序递增，保持原有先后关系）
+        if (typeof t.openedAt !== 'number') t.openedAt = Date.now() + byPath.size;
+        if (typeof t.modifiedAt !== 'number') t.modifiedAt = t.openedAt;
         const kept = byPath.get(key);
         if (!kept || (t.isDirty && !kept.isDirty)) byPath.set(key, { ...t, path: key });
       }
@@ -367,12 +440,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   return {
-    roots, tabs, activeTabPath, fsRevision, activeTab,
+    roots, tabs, activeTabPath, fsRevision, activeTab, pendingEviction,
     currentFilePath, currentFileName, isDirty, canSave, isSettingsActive,
     load, persist, addRoot, removeRoot, notifyFsChange,
     openFile, closeTab, switchTab, updateActiveContent,
     markDirty, markClean, markTabClean, getTab, openSettings, openExample,
-    createUntitledTab, saveTab,
+    createUntitledTab, saveTab, resolveEviction,
     saveSession, restoreSession,
   };
 });

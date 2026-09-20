@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useWorkspaceStore, isUntitledPath } from './workspace';
 import { useRequestStore } from './request';
+import { useSettingsStore } from './settings';
 
 /** 内存虚拟文件系统 — 模拟 Tauri 侧的文件读写 */
 const vfs = vi.hoisted(() => ({ files: new Map<string, string>() }));
@@ -32,60 +33,60 @@ beforeEach(() => {
 });
 
 describe('workspace store openFile', () => {
-  it('creates a tab and syncs the editor source', () => {
+  it('creates a tab and syncs the editor source', async () => {
     const ws = useWorkspaceStore();
-    ws.openFile('/ws/a.http', 'a.http', '### a');
+    await ws.openFile('/ws/a.http', 'a.http', '### a');
     expect(ws.tabs).toHaveLength(1);
     expect(ws.currentFilePath).toBe('/ws/a.http');
     expect(useRequestStore().source).toBe('### a');
   });
 
-  it('adopts new content when re-opening a clean tab (save-as over an open file)', () => {
+  it('adopts new content when re-opening a clean tab (save-as over an open file)', async () => {
     const ws = useWorkspaceStore();
-    ws.openFile('/ws/a.http', 'a.http', '### old');
-    ws.openFile('/ws/a.http', 'a.http', '### new');
+    await ws.openFile('/ws/a.http', 'a.http', '### old');
+    await ws.openFile('/ws/a.http', 'a.http', '### new');
     expect(ws.tabs).toHaveLength(1);
     expect(ws.getTab('/ws/a.http')?.content).toBe('### new');
     expect(useRequestStore().source).toBe('### new');
   });
 
-  it('keeps unsaved edits when re-opening a dirty tab', () => {
+  it('keeps unsaved edits when re-opening a dirty tab', async () => {
     const ws = useWorkspaceStore();
-    ws.openFile('/ws/a.http', 'a.http', '### old');
+    await ws.openFile('/ws/a.http', 'a.http', '### old');
     ws.updateActiveContent('### editing');
     ws.markDirty();
-    ws.openFile('/ws/a.http', 'a.http', '### from disk');
+    await ws.openFile('/ws/a.http', 'a.http', '### from disk');
     expect(ws.getTab('/ws/a.http')?.content).toBe('### editing');
     expect(ws.isDirty).toBe(true);
   });
 });
 
 describe('workspace store path normalization (Windows separators)', () => {
-  it('treats backslash and forward-slash paths as the same file (no duplicate tab)', () => {
+  it('treats backslash and forward-slash paths as the same file (no duplicate tab)', async () => {
     const ws = useWorkspaceStore();
     // 引导块拼接：反斜杠目录 + 正斜杠文件名
-    ws.openFile('C:\\Users\\me\\.http-client-pro/requests.http', 'requests.http', '### a');
+    await ws.openFile('C:\\Users\\me\\.http-client-pro/requests.http', 'requests.http', '### a');
     // 工作区树条目：全反斜杠
-    ws.openFile('C:\\Users\\me\\.http-client-pro\\requests.http', 'requests.http', '### a');
+    await ws.openFile('C:\\Users\\me\\.http-client-pro\\requests.http', 'requests.http', '### a');
     expect(ws.tabs).toHaveLength(1);
     expect(ws.tabs[0].path).toBe('C:/Users/me/.http-client-pro/requests.http');
   });
 
-  it('closeTab / switchTab / getTab match regardless of separator', () => {
+  it('closeTab / switchTab / getTab match regardless of separator', async () => {
     const ws = useWorkspaceStore();
-    ws.openFile('C:\\ws\\a.http', 'a.http', '### a');
+    await ws.openFile('C:\\ws\\a.http', 'a.http', '### a');
     expect(ws.getTab('C:/ws/a.http')).toBeDefined();
     expect(ws.getTab('C:\\ws\\a.http')).toBeDefined();
-    ws.openFile('C:\\ws\\b.http', 'b.http', '### b');
+    await ws.openFile('C:\\ws\\b.http', 'b.http', '### b');
     ws.switchTab('C:\\ws\\a.http');
     expect(ws.currentFilePath).toBe('C:/ws/a.http');
     ws.closeTab('C:\\ws\\b.http');
     expect(ws.tabs).toHaveLength(1);
   });
 
-  it('markTabClean matches regardless of separator', () => {
+  it('markTabClean matches regardless of separator', async () => {
     const ws = useWorkspaceStore();
-    ws.openFile('C:\\ws\\a.http', 'a.http', '### a');
+    await ws.openFile('C:\\ws\\a.http', 'a.http', '### a');
     ws.markDirty();
     expect(ws.isDirty).toBe(true);
     ws.markTabClean('C:/ws/a.http');
@@ -180,25 +181,25 @@ describe('workspace store untitled tabs', () => {
     expect(isUntitledPath('untitled.http')).toBe(false);
   });
 
-  it('createUntitledTab creates sequential non-conflicting tabs', () => {
+  it('createUntitledTab creates sequential non-conflicting tabs', async () => {
     const ws = useWorkspaceStore();
-    ws.createUntitledTab();
+    await ws.createUntitledTab();
     expect(ws.tabs[0]).toMatchObject({ path: 'untitled-1', name: 'Untitled.http', content: '' });
     expect(ws.currentFilePath).toBe('untitled-1');
 
-    ws.createUntitledTab();
+    await ws.createUntitledTab();
     expect(ws.tabs[1]).toMatchObject({ path: 'untitled-2', name: 'Untitled-2.http' });
 
     // 关闭第一个后再新建，应复用 untitled-1 而不产生冲突
     ws.closeTab('untitled-1');
-    ws.createUntitledTab();
+    await ws.createUntitledTab();
     expect(ws.tabs.map((t) => t.path)).toEqual(['untitled-2', 'untitled-1']);
   });
 
   it('saveTab saves an untitled tab into the default workspace and converts it in place', async () => {
     const ws = useWorkspaceStore();
     ws.addRoot('/ws', 'Default');
-    ws.createUntitledTab();
+    await ws.createUntitledTab();
     ws.updateActiveContent('### hello');
     ws.markDirty();
 
@@ -213,7 +214,7 @@ describe('workspace store untitled tabs', () => {
     const ws = useWorkspaceStore();
     ws.addRoot('/ws', 'Default');
     vfs.files.set('/ws/Untitled.http', '### existing');
-    ws.createUntitledTab();
+    await ws.createUntitledTab();
     ws.updateActiveContent('### new');
 
     expect(await ws.saveTab()).toBe(true);
@@ -224,7 +225,7 @@ describe('workspace store untitled tabs', () => {
 
   it('saveTab falls back to the backend default workspace when no root is present', async () => {
     const ws = useWorkspaceStore();
-    ws.createUntitledTab();
+    await ws.createUntitledTab();
     ws.updateActiveContent('### fallback');
 
     expect(await ws.saveTab()).toBe(true);
@@ -233,7 +234,7 @@ describe('workspace store untitled tabs', () => {
 
   it('saveTab writes a regular file tab and marks it clean', async () => {
     const ws = useWorkspaceStore();
-    ws.openFile('/ws/a.http', 'a.http', '### old');
+    await ws.openFile('/ws/a.http', 'a.http', '### old');
     ws.updateActiveContent('### edited');
     ws.markDirty();
     expect(ws.isDirty).toBe(true);
@@ -241,5 +242,92 @@ describe('workspace store untitled tabs', () => {
     expect(await ws.saveTab()).toBe(true);
     expect(vfs.files.get('/ws/a.http')).toBe('### edited');
     expect(ws.isDirty).toBe(false);
+  });
+});
+
+describe('workspace store tab capacity eviction', () => {
+  /** 打开 n 个已保存（clean）文件标签 */
+  async function openCleanFiles(ws: ReturnType<typeof useWorkspaceStore>, paths: string[]) {
+    for (const p of paths) {
+      await ws.openFile(p, p.split('/').pop()!, `### ${p}`);
+    }
+  }
+
+  it('evicts the earliest-opened clean tab when exceeding maxTabs', async () => {
+    const settings = useSettingsStore();
+    settings.maxTabs = 3;
+    const ws = useWorkspaceStore();
+    // 用递增的 openedAt 保证淘汰顺序确定
+    await openCleanFiles(ws, ['/ws/a.http', '/ws/b.http', '/ws/c.http']);
+    ws.tabs.forEach((t, i) => { t.openedAt = 1000 + i; });
+
+    await ws.openFile('/ws/d.http', 'd.http', '### d');
+    // 最早打开的 a.http 被淘汰，总数保持在上限
+    expect(ws.tabs.map((t) => t.path)).toEqual(['/ws/b.http', '/ws/c.http', '/ws/d.http']);
+    expect(ws.pendingEviction).toBeNull();
+  });
+
+  it('skips capacity when skipCapacity is set (untitled conversion)', async () => {
+    const settings = useSettingsStore();
+    settings.maxTabs = 1;
+    const ws = useWorkspaceStore();
+    ws.addRoot('/ws', 'Default');
+    await ws.createUntitledTab();
+    ws.updateActiveContent('### keep');
+    // 转正走 skipCapacity，不应因超限淘汰自身或触发弹窗
+    expect(await ws.saveTab()).toBe(true);
+    expect(ws.tabs.map((t) => t.path)).toEqual(['/ws/Untitled.http']);
+  });
+
+  it('asks for confirmation via pendingEviction when all file tabs are dirty', async () => {
+    const settings = useSettingsStore();
+    settings.maxTabs = 2;
+    const ws = useWorkspaceStore();
+    await openCleanFiles(ws, ['/ws/a.http', '/ws/b.http']);
+    ws.tabs.forEach((t, i) => { t.openedAt = 1000 + i; });
+    // 两个都置为未保存，modifiedAt 递增使 a.http 成为候选
+    ws.tabs.forEach((t, i) => { t.isDirty = true; t.modifiedAt = 2000 + i; });
+
+    // 不 await：openFile 会阻塞在弹窗 Promise 上
+    const opening = ws.openFile('/ws/c.http', 'c.http', '### c');
+    await Promise.resolve();
+    expect(ws.pendingEviction).toMatchObject({ path: '/ws/a.http', name: 'a.http' });
+
+    ws.resolveEviction('discard');
+    await opening;
+    expect(ws.pendingEviction).toBeNull();
+    expect(ws.tabs.map((t) => t.path)).toEqual(['/ws/b.http', '/ws/c.http']);
+  });
+
+  it('cancels opening when the eviction is cancelled', async () => {
+    const settings = useSettingsStore();
+    settings.maxTabs = 1;
+    const ws = useWorkspaceStore();
+    await ws.openFile('/ws/a.http', 'a.http', '### a');
+    ws.tabs[0].isDirty = true;
+
+    const opening = ws.openFile('/ws/b.http', 'b.http', '### b');
+    await Promise.resolve();
+    expect(ws.pendingEviction).toMatchObject({ path: '/ws/a.http' });
+
+    ws.resolveEviction('cancel');
+    await opening;
+    // 取消后不打开新标签，原标签保留
+    expect(ws.tabs.map((t) => t.path)).toEqual(['/ws/a.http']);
+    expect(ws.pendingEviction).toBeNull();
+  });
+
+  it('does not evict settings / example tabs', async () => {
+    const settings = useSettingsStore();
+    settings.maxTabs = 2;
+    const ws = useWorkspaceStore();
+    ws.openSettings();
+    ws.openExample('get');
+    await ws.openFile('/ws/a.http', 'a.http', '### a');
+    await ws.openFile('/ws/b.http', 'b.http', '### b');
+    // 设置与示例标签永不参与淘汰，只淘汰文件标签
+    expect(ws.getTab('__settings__')).toBeDefined();
+    expect(ws.getTab('__example_get__')).toBeDefined();
+    expect(ws.tabs.filter((t) => t.type === 'file').length).toBeLessThanOrEqual(2);
   });
 });

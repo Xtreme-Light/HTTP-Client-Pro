@@ -129,7 +129,7 @@ async function openFile(entry: FileEntry) {
   if (!fs) return;
   try {
     const content = await fs.readFile(entry.path);
-    workspaceStore.openFile(entry.path, entry.name, content);
+    await workspaceStore.openFile(entry.path, entry.name, content);
   } catch (e) {
     console.error('Failed to read file:', e);
     alert(`Failed to read file: ${e instanceof Error ? e.message : String(e)}`);

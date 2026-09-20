@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { DEFAULT_FONT_SIZE, FONT_SIZES, buildFontScale } from '../lib/fonts';
-import { DEFAULT_EDITOR_LINE_WRAP, useSettingsStore } from './settings';
+import {
+  DEFAULT_EDITOR_LINE_WRAP,
+  DEFAULT_MAX_TABS,
+  DEFAULT_TAB_LAYOUT,
+  DEFAULT_TAB_POSITION,
+  useSettingsStore,
+} from './settings';
 
 const STORAGE_KEY = 'http-client-pro:settings';
 
@@ -116,5 +122,68 @@ describe('settings editorLineWrap', () => {
     settings.editorLineWrap = false;
     settings.restore(before);
     expect(settings.editorLineWrap).toBe(DEFAULT_EDITOR_LINE_WRAP);
+  });
+});
+
+describe('settings tab options', () => {
+  it('defaults to top / single / 5', () => {
+    const settings = useSettingsStore();
+    expect(DEFAULT_TAB_POSITION).toBe('top');
+    expect(DEFAULT_TAB_LAYOUT).toBe('single');
+    expect(DEFAULT_MAX_TABS).toBe(5);
+    expect(settings.tabPosition).toBe('top');
+    expect(settings.tabLayout).toBe('single');
+    expect(settings.maxTabs).toBe(5);
+  });
+
+  it('persists immediately on change (no apply needed)', () => {
+    const settings = useSettingsStore();
+    settings.tabPosition = 'left';
+    settings.tabLayout = 'multi';
+    settings.maxTabs = 8;
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+    expect(stored.tabPosition).toBe('left');
+    expect(stored.tabLayout).toBe('multi');
+    expect(stored.maxTabs).toBe(8);
+  });
+
+  it('round-trips through load after restart', () => {
+    const settings = useSettingsStore();
+    settings.tabPosition = 'right';
+    settings.maxTabs = 12;
+
+    setActivePinia(createPinia());
+    const reloaded = useSettingsStore();
+    reloaded.load();
+    expect(reloaded.tabPosition).toBe('right');
+    expect(reloaded.tabLayout).toBe('single');
+    expect(reloaded.maxTabs).toBe(12);
+  });
+
+  it('ignores invalid position / layout', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tabPosition: 'bottom', tabLayout: 'grid' }));
+    const settings = useSettingsStore();
+    settings.load();
+    expect(settings.tabPosition).toBe('top');
+    expect(settings.tabLayout).toBe('single');
+  });
+
+  it('ignores maxTabs out of range or non-integer', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ maxTabs: 0 }));
+    let settings = useSettingsStore();
+    settings.load();
+    expect(settings.maxTabs).toBe(DEFAULT_MAX_TABS);
+
+    setActivePinia(createPinia());
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ maxTabs: 999 }));
+    settings = useSettingsStore();
+    settings.load();
+    expect(settings.maxTabs).toBe(DEFAULT_MAX_TABS);
+
+    setActivePinia(createPinia());
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ maxTabs: 3.5 }));
+    settings = useSettingsStore();
+    settings.load();
+    expect(settings.maxTabs).toBe(DEFAULT_MAX_TABS);
   });
 });

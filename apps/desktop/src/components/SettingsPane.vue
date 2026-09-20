@@ -1,7 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useWorkspaceStore } from '../stores/workspace';
-import { useSettingsStore, type SettingsSnapshot } from '../stores/settings';
+import {
+  useSettingsStore,
+  MAX_TABS_MAX,
+  MAX_TABS_MIN,
+  type SettingsSnapshot,
+  type TabLayout,
+  type TabPosition,
+} from '../stores/settings';
 import {
   EDITOR_SCHEME_FOLLOW,
   EDITOR_SCHEMES,
@@ -24,16 +31,43 @@ const settings = useSettingsStore();
 
 const SETTINGS_TAB_PATH = '__settings__';
 
-type MenuKey = 'appearance' | 'editor' | 'shortcuts' | 'about';
+type MenuKey = 'appearance' | 'editor' | 'tabs' | 'shortcuts' | 'about';
 
 const activeMenu = ref<MenuKey>('appearance');
 
 const menus: { key: MenuKey; label: string }[] = [
   { key: 'appearance', label: '外观' },
   { key: 'editor', label: '编辑器' },
+  { key: 'tabs', label: '标签页' },
   { key: 'shortcuts', label: '快捷键' },
   { key: 'about', label: '关于我们' },
 ];
+
+/* ---------------- 标签页设置 ---------------- */
+
+const tabPositionOptions: { value: TabPosition; label: string }[] = [
+  { value: 'top', label: '头部（默认）' },
+  { value: 'left', label: '左侧' },
+  { value: 'right', label: '右侧' },
+];
+
+const tabLayoutOptions: { value: TabLayout; label: string }[] = [
+  { value: 'single', label: '单行：超出横向滚动' },
+  { value: 'multi', label: '多行：自动换行显示' },
+];
+
+/** 标签栏空白处右键「标签页设置…」直达此配置区 */
+function onOpenTabSettings() {
+  activeMenu.value = 'tabs';
+}
+
+onMounted(() => {
+  window.addEventListener('app:open-tab-settings', onOpenTabSettings);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('app:open-tab-settings', onOpenTabSettings);
+});
 
 /* ---------------- 快照 / 应用 / 关闭 ---------------- */
 
@@ -345,6 +379,52 @@ onMounted(loadAbout);
                 <option :value="false">关闭：单行显示，横向滚动查看</option>
               </select>
               <p class="field-hint">默认开启。一行内容过长时自动换到下一行展示，不改变文件本身的内容。</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============ 标签页 ============ -->
+        <div v-else-if="activeMenu === 'tabs'" class="settings-section">
+          <h3>标签页</h3>
+
+          <div class="settings-grid">
+            <div class="field col-6">
+              <label class="field-label">标签页位置</label>
+              <select v-model="settings.tabPosition" class="select">
+                <option v-for="o in tabPositionOptions" :key="o.value" :value="o.value">
+                  {{ o.label }}
+                </option>
+              </select>
+              <p class="field-hint">标签栏显示在编辑器的头部、左侧或右侧，修改后立即生效并自动保存。</p>
+            </div>
+
+            <div class="field col-6">
+              <label class="field-label">标签页展示方式</label>
+              <select v-model="settings.tabLayout" class="select" :disabled="settings.tabPosition !== 'top'">
+                <option v-for="o in tabLayoutOptions" :key="o.value" :value="o.value">
+                  {{ o.label }}
+                </option>
+              </select>
+              <p class="field-hint">
+                仅在位置为「头部」时生效；左侧 / 右侧固定为单列纵向滚动。
+              </p>
+            </div>
+
+            <div class="field col-6">
+              <label class="field-label">最大标签页数量</label>
+              <input
+                v-model.number="settings.maxTabs"
+                class="input"
+                type="number"
+                :min="MAX_TABS_MIN"
+                :max="MAX_TABS_MAX"
+                step="1"
+              />
+              <p class="field-hint">
+                范围 {{ MAX_TABS_MIN }} ~ {{ MAX_TABS_MAX }}，默认 5。超出上限时优先关闭最早打开的已保存标签页；
+                若全部有未保存修改，则对其中修改时间最早的一个弹出保存询问（保存 / 不保存 / 取消打开）。
+                设置与示例标签页不计入上限。
+              </p>
             </div>
           </div>
         </div>

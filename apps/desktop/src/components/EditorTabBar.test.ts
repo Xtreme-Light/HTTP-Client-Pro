@@ -39,16 +39,18 @@ describe('EditorTabBar double-click to create', () => {
     const ws = useWorkspaceStore();
 
     await wrapper.find('.editor-tab-bar').trigger('dblclick');
+    await flushPromises();
     expect(ws.tabs).toHaveLength(1);
     expect(ws.tabs[0]).toMatchObject({ path: 'untitled-1', name: 'Untitled.http' });
   });
 
   it('does not create a tab when double-clicking on an existing tab', async () => {
     const ws = useWorkspaceStore();
-    ws.openFile('/ws/a.http', 'a.http', '### a');
+    await ws.openFile('/ws/a.http', 'a.http', '### a');
     const wrapper = mount(EditorTabBar);
 
     await wrapper.find('.editor-tab').trigger('dblclick');
+    await flushPromises();
     expect(ws.tabs).toHaveLength(1);
     expect(ws.tabs[0].path).toBe('/ws/a.http');
   });
@@ -58,12 +60,13 @@ describe('EditorTabBar close dialog for untitled tabs', () => {
   it('saves a dirty untitled tab into the default workspace and closes it', async () => {
     const ws = useWorkspaceStore();
     ws.addRoot('/ws', 'Default');
-    ws.createUntitledTab();
+    await ws.createUntitledTab();
     ws.updateActiveContent('### hello');
     ws.markDirty();
 
     const wrapper = mount(EditorTabBar);
     await wrapper.find('.tab-close').trigger('click');
+    await flushPromises();
     expect(wrapper.find('.modal-overlay').exists()).toBe(true);
 
     await wrapper.find('.btn-save').trigger('click');
@@ -74,5 +77,44 @@ describe('EditorTabBar close dialog for untitled tabs', () => {
     expect(ws.tabs).toHaveLength(1);
     expect(ws.tabs[0].path).toBe('/ws/Untitled.http');
     expect(wrapper.find('.modal-overlay').exists()).toBe(false);
+  });
+});
+
+describe('EditorTabBar context menus', () => {
+  it('shows the tab menu on right-clicking a tab', async () => {
+    const ws = useWorkspaceStore();
+    await ws.openFile('/ws/a.http', 'a.http', '### a');
+    const wrapper = mount(EditorTabBar);
+
+    await wrapper.find('.editor-tab').trigger('contextmenu', { clientX: 20, clientY: 10 });
+    const menu = wrapper.find('.ctx-menu');
+    expect(menu.exists()).toBe(true);
+    const labels = menu.findAll('.menu-item').map((b) => b.text());
+    expect(labels).toEqual(['保存', '另存为…', '关闭', '关闭全部', '关闭其他', '打开所在位置']);
+  });
+
+  it('shows the bar menu on right-clicking the blank area', async () => {
+    const ws = useWorkspaceStore();
+    const wrapper = mount(EditorTabBar);
+
+    await wrapper.find('.editor-tab-bar').trigger('contextmenu', { clientX: 200, clientY: 10 });
+    const menu = wrapper.find('.ctx-menu');
+    expect(menu.exists()).toBe(true);
+    expect(menu.findAll('.menu-item').map((b) => b.text())).toEqual(['新建标签页', '标签页设置…']);
+    expect(ws).toBeDefined();
+  });
+
+  it('closes all tabs via the tab context menu', async () => {
+    const ws = useWorkspaceStore();
+    await ws.openFile('/ws/a.http', 'a.http', '### a');
+    await ws.openFile('/ws/b.http', 'b.http', '### b');
+    const wrapper = mount(EditorTabBar);
+
+    await wrapper.find('.editor-tab').trigger('contextmenu', { clientX: 20, clientY: 10 });
+    const items = wrapper.findAll('.ctx-menu .menu-item');
+    // 「关闭全部」
+    await items[3].trigger('click');
+    await flushPromises();
+    expect(ws.tabs).toHaveLength(0);
   });
 });

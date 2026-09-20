@@ -330,6 +330,48 @@ fn get_default_workspace() -> Result<String, String> {
     Ok(ws.to_string_lossy().into_owned())
 }
 
+/// 在系统文件管理器中定位文件（Windows 选中文件 / macOS 选中文件 / Linux 打开所在目录）
+#[tauri::command]
+fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    use std::process::Command;
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(format!("Path not found: {path}"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // explorer /select, 需要反斜杠路径；explorer 退出码不可靠，忽略之
+        let win_path = path.replace('/', "\\");
+        Command::new("explorer")
+            .arg(format!("/select,{win_path}"))
+            .spawn()
+            .map_err(|e| format!("Failed to open explorer: {e}"))?;
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open Finder: {e}"))?;
+        Ok(())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        // Linux 无统一的"选中文件"能力，退而打开所在目录
+        let dir = p
+            .parent()
+            .map(|d| d.to_path_buf())
+            .filter(|d| d.is_dir())
+            .unwrap_or_else(|| p.to_path_buf());
+        Command::new("xdg-open")
+            .arg(&dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open file manager: {e}"))?;
+        Ok(())
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -348,6 +390,7 @@ fn main() {
             rename_path,
             delete_file,
             get_default_workspace,
+            reveal_in_file_manager,
             check_update,
             download_and_install_update,
             fetch_json

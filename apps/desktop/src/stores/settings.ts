@@ -26,6 +26,20 @@ const STORAGE_KEY = 'http-client-pro:settings';
 /** Editor 长行折行的默认值（默认开启） */
 export const DEFAULT_EDITOR_LINE_WRAP = true;
 
+/** 标签栏位置：头部（默认）/ 左侧 / 右侧 */
+export type TabPosition = 'top' | 'left' | 'right';
+/** 标签展示方式：单行（默认，横向滚动）/ 多行（自动换行） */
+export type TabLayout = 'single' | 'multi';
+
+export const TAB_POSITIONS: TabPosition[] = ['top', 'left', 'right'];
+export const TAB_LAYOUTS: TabLayout[] = ['single', 'multi'];
+export const DEFAULT_TAB_POSITION: TabPosition = 'top';
+export const DEFAULT_TAB_LAYOUT: TabLayout = 'single';
+/** 最大标签页数量默认值；超出时按打开时间淘汰已保存标签 */
+export const DEFAULT_MAX_TABS = 5;
+export const MAX_TABS_MIN = 1;
+export const MAX_TABS_MAX = 50;
+
 export interface SettingsSnapshot {
   themeId: string;
   editorSchemeId: string;
@@ -34,6 +48,12 @@ export interface SettingsSnapshot {
   fontSize: number;
   /** Editor 长行折行显示 */
   editorLineWrap: boolean;
+  /** 标签栏位置 */
+  tabPosition: TabPosition;
+  /** 标签展示方式（单行 / 多行） */
+  tabLayout: TabLayout;
+  /** 最大标签页数量 */
+  maxTabs: number;
   keymapScheme: KeymapSchemeId;
   updateSource: UpdateSource;
 }
@@ -51,6 +71,12 @@ export const useSettingsStore = defineStore('settings', () => {
   const fontSize = ref<number>(DEFAULT_FONT_SIZE);
   /** Editor 长行折行显示（关闭时长行横向滚动） */
   const editorLineWrap = ref<boolean>(DEFAULT_EDITOR_LINE_WRAP);
+  /** 标签栏位置（头部 / 左侧 / 右侧） */
+  const tabPosition = ref<TabPosition>(DEFAULT_TAB_POSITION);
+  /** 标签展示方式（单行横向滚动 / 多行换行） */
+  const tabLayout = ref<TabLayout>(DEFAULT_TAB_LAYOUT);
+  /** 最大标签页数量，超出时淘汰最早打开的已保存标签 */
+  const maxTabs = ref<number>(DEFAULT_MAX_TABS);
   /** 快捷键方案 */
   const keymapScheme = ref<KeymapSchemeId>(DEFAULT_KEYMAP_SCHEME);
   /** 更新下载源：github（官方）| cnb（国内镜像） */
@@ -110,6 +136,18 @@ export const useSettingsStore = defineStore('settings', () => {
       if (typeof parsed.editorLineWrap === 'boolean') {
         editorLineWrap.value = parsed.editorLineWrap;
       }
+      if (typeof parsed.tabPosition === 'string' && TAB_POSITIONS.includes(parsed.tabPosition as TabPosition)) {
+        tabPosition.value = parsed.tabPosition as TabPosition;
+      }
+      if (typeof parsed.tabLayout === 'string' && TAB_LAYOUTS.includes(parsed.tabLayout as TabLayout)) {
+        tabLayout.value = parsed.tabLayout as TabLayout;
+      }
+      if (
+        typeof parsed.maxTabs === 'number' && Number.isInteger(parsed.maxTabs) &&
+        parsed.maxTabs >= MAX_TABS_MIN && parsed.maxTabs <= MAX_TABS_MAX
+      ) {
+        maxTabs.value = parsed.maxTabs;
+      }
       if (parsed.keymapScheme && parsed.keymapScheme in KEYMAPS) {
         keymapScheme.value = parsed.keymapScheme;
       }
@@ -137,6 +175,9 @@ export const useSettingsStore = defineStore('settings', () => {
       uiFontFallback: uiFontFallback.value,
       fontSize: fontSize.value,
       editorLineWrap: editorLineWrap.value,
+      tabPosition: tabPosition.value,
+      tabLayout: tabLayout.value,
+      maxTabs: maxTabs.value,
       keymapScheme: keymapScheme.value,
       updateSource: updateSource.value,
     };
@@ -149,6 +190,9 @@ export const useSettingsStore = defineStore('settings', () => {
     uiFontFallback.value = s.uiFontFallback;
     fontSize.value = s.fontSize;
     editorLineWrap.value = s.editorLineWrap;
+    tabPosition.value = s.tabPosition;
+    tabLayout.value = s.tabLayout;
+    maxTabs.value = s.maxTabs;
     keymapScheme.value = s.keymapScheme;
     updateSource.value = s.updateSource;
   }
@@ -161,6 +205,10 @@ export const useSettingsStore = defineStore('settings', () => {
   // 实时应用到 DOM（预览），不持久化；仅"应用"按钮触发持久化。
   watch([themeId, editorSchemeId, uiFont, uiFontFallback, fontSize], () => applyDom(), { flush: 'post' });
 
+  // 标签页设置即时生效并立即持久化（不经"应用"按钮），
+  // 避免关闭设置页时 restore 把预览中的布局改动悄悄回退。
+  watch([tabPosition, tabLayout, maxTabs], () => persist(), { flush: 'sync' });
+
   return {
     themeId,
     editorSchemeId,
@@ -168,6 +216,9 @@ export const useSettingsStore = defineStore('settings', () => {
     uiFontFallback,
     fontSize,
     editorLineWrap,
+    tabPosition,
+    tabLayout,
+    maxTabs,
     keymapScheme,
     updateSource,
     theme,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Splitpanes, Pane } from 'splitpanes';
 import 'splitpanes/dist/splitpanes.css';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -40,6 +40,7 @@ const { run } = useRunCurrent();
 
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown);
+  window.addEventListener('app:save-as', onAppSaveAs);
   // 浏览器环境的兜底：Tauri 关窗不一定触发 beforeunload，另见 registerCloseHook
   window.addEventListener('beforeunload', onBeforeUnload);
   await registerCloseHook();
@@ -71,6 +72,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKeydown);
+  window.removeEventListener('app:save-as', onAppSaveAs);
   window.removeEventListener('beforeunload', onBeforeUnload);
   unlistenClose?.();
   unlistenClose = null;
@@ -166,23 +168,40 @@ async function saveFile() {
   }
 }
 
-async function saveAs() {
+/** 标签页右键菜单「另存为…」— 事件携带来源标签路径 */
+function onAppSaveAs(e: Event) {
+  const detail = (e as CustomEvent<{ path?: string }>).detail;
+  void saveAs(detail?.path ?? null);
+}
+
+/**
+ * 另存为 — 优先使用原生保存对话框（Tauri），
+ * sourcePath 指定来源标签页（右键菜单触发时），默认当前激活标签页。
+ */
+async function saveAs(sourcePath?: string | null) {
   const fs = getFs();
   if (!fs) return;
-  const prevPath = workspaceStore.currentFilePath;
+  const prevPath = sourcePath ?? workspaceStore.currentFilePath;
   const canUsePrev = prevPath && workspaceStore.canSave && !isUntitledPath(prevPath);
-  const fallback = workspaceStore.roots.length > 0
-    ? `${workspaceStore.roots[0].path}/Untitled.http`
-    : '~/Untitled.http';
-  const name = prompt('Save as (full path):', canUsePrev ? prevPath : fallback);
+  const prevTab = prevPath ? workspaceStore.getTab(prevPath) : null;
+  const defaultName = canUsePrev
+    ? prevPath!
+    : `${workspaceStore.roots.length > 0 ? workspaceStore.roots[0].path : '~'}/Untitled.http`;
+  let name: string | null;
+  try {
+    name = await fs.pickSavePath(defaultName);
+  } catch {
+    // 非 Tauri 环境回退为 prompt
+    name = prompt('Save as (full path):', defaultName);
+  }
   if (!name) return;
   const content = prevPath ? contentToSave(prevPath) : requestStore.source;
   try {
     await fs.writeFile(name, content);
     const parts = name.split('/');
-    workspaceStore.openFile(name, parts[parts.length - 1] || name, content);
+    await workspaceStore.openFile(name, parts[parts.length - 1] || name, content);
     // 「另存为」成功后关闭来源的未命名标签页
-    if (prevPath && isUntitledPath(prevPath)) {
+    if (prevPath && prevTab && isUntitledPath(prevPath)) {
       workspaceStore.closeTab(prevPath);
     }
     // 目标标签页内容与已写入内容一致时才标记为已保存
@@ -197,7 +216,7 @@ async function saveAs() {
 
 /** 新建文件：创建一个未命名标签页（保存时写入默认工作区目录） */
 function newFile() {
-  workspaceStore.createUntitledTab();
+  void workspaceStore.createUntitledTab();
 }
 
 /** 打开文件：弹出文件选择对话框并载入标签页 */
@@ -209,13 +228,19 @@ async function openFilePicker() {
     if (!path) return;
     const content = await fs.readFile(path);
     const name = path.split('/').pop() || path;
-    workspaceStore.openFile(path, name, content);
+    await workspaceStore.openFile(path, name, content);
   } catch (e) {
     alert(`Failed to open file: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
 /* ================= 视图：缩放 ================= */
+
+/** 编辑器面板布局 — 标签页位置为左侧/右侧时容器改为行向 */
+const editorPaneClass = computed(() => ({
+  'pane-row-left': settings.tabPosition === 'left',
+  'pane-row-right': settings.tabPosition === 'right',
+}));
 
 const zoomLevel = ref(1);
 
@@ -371,7 +396,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
           <Splitpanes class="center-split" horizontal :first-splitter="true">
             <!-- Top: editor -->
             <Pane :size="55" :min="20">
-              <div class="pane-container">
+              <div class="pane-container" :class="editorPaneClass">
                 <EditorTabBar />
                 <div class="pane-body">
                   <SettingsPane v-if="workspaceStore.isSettingsActive" />
@@ -433,6 +458,22 @@ function onGlobalKeydown(e: KeyboardEvent) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* 标签页位置为左侧/右侧时，编辑器容器改为行向（right 用 row-reverse 让标签栏靠右） */
+.pane-row-left,
+.pane-row-right {
+  flex-direction: row;
+}
+
+.pane-row-right {
+  flex-direction: row-reverse;
+}
+
+.pane-row-left .pane-body,
+.pane-row-right .pane-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .pane-body {

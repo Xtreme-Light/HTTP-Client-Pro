@@ -111,7 +111,7 @@ describe('first launch bootstrap', () => {
     await flushPromises();
 
     const ws = useWorkspaceStore();
-    ws.openFile('/ws/a.http', 'a.http', '### init');
+    await ws.openFile('/ws/a.http', 'a.http', '### init');
     // 模拟编辑器输入：标签页内容同步更新，requestStore 仍在防抖窗口内
     ws.updateActiveContent('### edited');
     ws.markDirty();
@@ -128,7 +128,7 @@ describe('first launch bootstrap', () => {
     await flushPromises();
 
     const ws = useWorkspaceStore();
-    ws.createUntitledTab();
+    await ws.createUntitledTab();
     ws.updateActiveContent('### new');
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }));
@@ -159,7 +159,7 @@ describe('session persistence', () => {
     await vi.advanceTimersByTimeAsync(400);
 
     const ws = useWorkspaceStore();
-    ws.openFile('/ws/a.http', 'a.http', '### a');
+    await ws.openFile('/ws/a.http', 'a.http', '### a');
     await vi.advanceTimersByTimeAsync(400);
 
     const session = readSession();
@@ -173,7 +173,7 @@ describe('session persistence', () => {
     await flushPromises();
 
     const ws = useWorkspaceStore();
-    ws.openFile('/ws/a.http', 'a.http', '### init');
+    await ws.openFile('/ws/a.http', 'a.http', '### init');
     ws.updateActiveContent('### latest');
     ws.markDirty();
 
