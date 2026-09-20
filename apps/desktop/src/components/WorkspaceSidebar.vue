@@ -264,8 +264,8 @@ onMounted(async () => {
       console.error('Failed to init default workspace:', e);
     }
   }
-  // 目录内容在展开时按需加载（见 toggleDir），不在此处预加载：
-  // 预加载只会把「默认 requests.http 尚未创建」时的空列表缓存下来。
+  // 目录内容在展开时按需加载（见 toggleDir），不在此处预加载，
+  // 避免把过期缓存带进首屏。
 });
 
 // 文件系统变更（保存 / 新建 / 删除）→ 刷新目录树
@@ -283,9 +283,10 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
       <div v-for="root in roots" :key="root.id" class="root-item" :data-root-path="root.path">
         <div
           class="tree-node root-node"
+          @click="toggleDir(root.path)"
           @contextmenu="onContextMenu($event, { name: root.name, path: root.path, isDir: true })"
         >
-          <span class="toggle" @click="toggleDir(root.path)">
+          <span class="toggle">
             {{ expandedDirs.has(root.path) ? '▼' : '▶' }}
           </span>
           <span class="file-icon folder-icon">📁</span>
@@ -394,7 +395,7 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
 }
 
 .sidebar-title {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   text-transform: uppercase;
   color: var(--fg-muted);
   letter-spacing: 0.5px;
@@ -406,9 +407,10 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
   border-radius: 3px;
   background: var(--bg-button);
   cursor: pointer;
-  font-size: 14px;
-  width: 22px;
-  height: 22px;
+  font-size: calc(14px * var(--font-scale, 1));
+  /* 图标字形随字号缩放，按钮盒子同步放大以免溢出 */
+  width: calc(22px * var(--font-scale, 1));
+  height: calc(22px * var(--font-scale, 1));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -436,7 +438,7 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
   gap: 4px;
   padding: 2px 8px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--fg);
 }
 
@@ -446,14 +448,14 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
 
 .toggle {
   width: 12px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--fg-muted);
   text-align: center;
   flex-shrink: 0;
 }
 
 .file-icon {
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   flex-shrink: 0;
 }
 
@@ -473,7 +475,7 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
   background: none;
   cursor: pointer;
   color: var(--fg-muted);
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale, 1));
   padding: 0 4px;
   opacity: 0;
   transition: opacity 0.15s;
@@ -488,7 +490,7 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
 }
 
 .empty-dir {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--fg-muted);
   font-style: italic;
   padding: 2px 0;
@@ -513,7 +515,7 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--fg);
 }
 
@@ -551,7 +553,7 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
 }
 
 .modal h3 {
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   margin-bottom: 12px;
   color: var(--fg);
 }
@@ -561,7 +563,7 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
   padding: 6px 8px;
   border: 1px solid var(--border-strong);
   border-radius: 4px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-family: var(--font-editor);
 }
 
@@ -585,7 +587,7 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
   background: var(--bg-button);
   color: var(--fg-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 
 .modal-actions button.primary {

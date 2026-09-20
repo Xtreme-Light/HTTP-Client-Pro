@@ -1,11 +1,34 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { useWorkspaceStore } from './workspace';
+import { useWorkspaceStore, isUntitledPath } from './workspace';
 import { useRequestStore } from './request';
+
+/** 内存虚拟文件系统 — 模拟 Tauri 侧的文件读写 */
+const vfs = vi.hoisted(() => ({ files: new Map<string, string>() }));
+
+vi.mock('../lib/backend/fs', () => ({
+  getFs: () => ({
+    async listDir() { return []; },
+    async readFile(path: string) {
+      const c = vfs.files.get(path);
+      if (c === undefined) throw new Error(`Failed to read file: ${path}`);
+      return c;
+    },
+    async writeFile(path: string, content: string) { vfs.files.set(path, content); },
+    async createFile(path: string) { vfs.files.set(path, ''); },
+    async createDir() { /* noop */ },
+    async renamePath() { /* noop */ },
+    async deleteFile(path: string) { vfs.files.delete(path); },
+    async getDefaultWorkspace() { return '/ws'; },
+    async pickDirectory() { return null; },
+    async pickFile() { return null; },
+  }),
+}));
 
 beforeEach(() => {
   setActivePinia(createPinia());
   localStorage.clear();
+  vfs.files.clear();
 });
 
 describe('workspace store openFile', () => {
@@ -146,5 +169,77 @@ describe('workspace store fs change notification', () => {
     const before = ws.fsRevision;
     ws.notifyFsChange();
     expect(ws.fsRevision).toBe(before + 1);
+  });
+});
+
+describe('workspace store untitled tabs', () => {
+  it('isUntitledPath matches only untitled-N paths', () => {
+    expect(isUntitledPath('untitled-1')).toBe(true);
+    expect(isUntitledPath('untitled-12')).toBe(true);
+    expect(isUntitledPath('/ws/untitled-1.http')).toBe(false);
+    expect(isUntitledPath('untitled.http')).toBe(false);
+  });
+
+  it('createUntitledTab creates sequential non-conflicting tabs', () => {
+    const ws = useWorkspaceStore();
+    ws.createUntitledTab();
+    expect(ws.tabs[0]).toMatchObject({ path: 'untitled-1', name: 'Untitled.http', content: '' });
+    expect(ws.currentFilePath).toBe('untitled-1');
+
+    ws.createUntitledTab();
+    expect(ws.tabs[1]).toMatchObject({ path: 'untitled-2', name: 'Untitled-2.http' });
+
+    // 关闭第一个后再新建，应复用 untitled-1 而不产生冲突
+    ws.closeTab('untitled-1');
+    ws.createUntitledTab();
+    expect(ws.tabs.map((t) => t.path)).toEqual(['untitled-2', 'untitled-1']);
+  });
+
+  it('saveTab saves an untitled tab into the default workspace and converts it in place', async () => {
+    const ws = useWorkspaceStore();
+    ws.addRoot('/ws', 'Default');
+    ws.createUntitledTab();
+    ws.updateActiveContent('### hello');
+    ws.markDirty();
+
+    expect(await ws.saveTab()).toBe(true);
+    expect(vfs.files.get('/ws/Untitled.http')).toBe('### hello');
+    expect(ws.tabs).toHaveLength(1);
+    expect(ws.tabs[0]).toMatchObject({ path: '/ws/Untitled.http', name: 'Untitled.http', isDirty: false });
+    expect(ws.currentFilePath).toBe('/ws/Untitled.http');
+  });
+
+  it('saveTab picks a unique name when Untitled.http already exists on disk', async () => {
+    const ws = useWorkspaceStore();
+    ws.addRoot('/ws', 'Default');
+    vfs.files.set('/ws/Untitled.http', '### existing');
+    ws.createUntitledTab();
+    ws.updateActiveContent('### new');
+
+    expect(await ws.saveTab()).toBe(true);
+    expect(vfs.files.get('/ws/Untitled.http')).toBe('### existing');
+    expect(vfs.files.get('/ws/Untitled-2.http')).toBe('### new');
+    expect(ws.tabs[0].path).toBe('/ws/Untitled-2.http');
+  });
+
+  it('saveTab falls back to the backend default workspace when no root is present', async () => {
+    const ws = useWorkspaceStore();
+    ws.createUntitledTab();
+    ws.updateActiveContent('### fallback');
+
+    expect(await ws.saveTab()).toBe(true);
+    expect(vfs.files.get('/ws/Untitled.http')).toBe('### fallback');
+  });
+
+  it('saveTab writes a regular file tab and marks it clean', async () => {
+    const ws = useWorkspaceStore();
+    ws.openFile('/ws/a.http', 'a.http', '### old');
+    ws.updateActiveContent('### edited');
+    ws.markDirty();
+    expect(ws.isDirty).toBe(true);
+
+    expect(await ws.saveTab()).toBe(true);
+    expect(vfs.files.get('/ws/a.http')).toBe('### edited');
+    expect(ws.isDirty).toBe(false);
   });
 });

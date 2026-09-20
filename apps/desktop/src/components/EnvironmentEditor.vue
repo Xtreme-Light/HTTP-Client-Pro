@@ -116,7 +116,7 @@ function togglePanel() {
   border-radius: 4px;
   background: var(--bg-input);
   color: var(--fg-secondary);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
 }
 
@@ -145,7 +145,7 @@ function togglePanel() {
 .env-section:last-child { margin-bottom: 0; }
 
 .section-label {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   text-transform: uppercase;
   color: var(--fg-muted);
   margin-bottom: 6px;
@@ -164,7 +164,7 @@ function togglePanel() {
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   background: var(--bg-input);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
   color: var(--fg-secondary);
 }
@@ -185,7 +185,7 @@ function togglePanel() {
   padding: 2px 6px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   background: var(--bg-input-deep);
   color: var(--fg);
 }
@@ -196,7 +196,7 @@ function togglePanel() {
   border-radius: 3px;
   background: var(--bg-input);
   cursor: pointer;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   color: var(--focus);
 }
 
@@ -215,7 +215,7 @@ function togglePanel() {
 
 .var-key {
   width: 100px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-family: var(--font-editor);
   color: var(--syn-keyword);
   overflow: hidden;
@@ -229,7 +229,7 @@ function togglePanel() {
   padding: 2px 6px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-family: var(--font-editor);
   background: var(--bg-input-deep);
   color: var(--fg);
@@ -242,7 +242,7 @@ function togglePanel() {
   background: var(--bg-input);
   color: var(--danger);
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 .remove-var-btn:hover { background: var(--danger-bg); }
@@ -258,7 +258,7 @@ function togglePanel() {
   padding: 2px 6px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   flex-shrink: 0;
   background: var(--bg-input-deep);
   color: var(--fg);
@@ -270,7 +270,7 @@ function togglePanel() {
   border-radius: 3px;
   background: var(--success);
   color: var(--success-fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
   white-space: nowrap;
 }

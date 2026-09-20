@@ -93,27 +93,16 @@ beforeEach(() => {
 });
 
 describe('first launch bootstrap', () => {
-  it('creates the default requests.http and shows it in the workspace tree', async () => {
+  it('starts blank without tabs and does not create any default file', async () => {
     const wrapper = mountApp();
     await flushPromises();
 
     const ws = useWorkspaceStore();
-    expect(ws.tabs.map((t) => t.name)).toEqual(['requests.http']);
-    expect(vfs.files.has('/ws/requests.http')).toBe(true);
-
-    // 展开 Default 根目录 → 必须能看到启动时创建的默认文件
-    await wrapper.find('.root-node .toggle').trigger('click');
-    await flushPromises();
-    expect(wrapper.text()).toContain('requests.http');
-  });
-
-  it('opens an existing default file without rewriting it', async () => {
-    vfs.files.set('/ws/requests.http', '### from disk');
-    const wrapper = mountApp();
-    await flushPromises();
-
-    expect(vfs.calls).not.toContain('write:/ws/requests.http');
-    expect(useRequestStore().source).toBe('### from disk');
+    expect(ws.tabs).toEqual([]);
+    expect(useRequestStore().source).toBe('');
+    expect(vfs.calls.filter((c) => c.startsWith('write:'))).toEqual([]);
+    // Default 工作区根仍由侧栏初始化
+    expect(ws.roots.map((r) => r.path)).toEqual(['/ws']);
     wrapper.unmount();
   });
 
@@ -122,6 +111,7 @@ describe('first launch bootstrap', () => {
     await flushPromises();
 
     const ws = useWorkspaceStore();
+    ws.openFile('/ws/a.http', 'a.http', '### init');
     // 模拟编辑器输入：标签页内容同步更新，requestStore 仍在防抖窗口内
     ws.updateActiveContent('### edited');
     ws.markDirty();
@@ -129,7 +119,23 @@ describe('first launch bootstrap', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }));
     await flushPromises();
 
-    expect(vfs.files.get('/ws/requests.http')).toBe('### edited');
+    expect(vfs.files.get('/ws/a.http')).toBe('### edited');
+    expect(ws.isDirty).toBe(false);
+  });
+
+  it('saves an untitled tab into the default workspace on Ctrl+S', async () => {
+    mountApp();
+    await flushPromises();
+
+    const ws = useWorkspaceStore();
+    ws.createUntitledTab();
+    ws.updateActiveContent('### new');
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }));
+    await flushPromises();
+
+    expect(vfs.files.get('/ws/Untitled.http')).toBe('### new');
+    expect(ws.tabs.map((t) => t.path)).toEqual(['/ws/Untitled.http']);
     expect(ws.isDirty).toBe(false);
   });
 });
@@ -152,9 +158,13 @@ describe('session persistence', () => {
     const wrapper = mountApp();
     await vi.advanceTimersByTimeAsync(400);
 
+    const ws = useWorkspaceStore();
+    ws.openFile('/ws/a.http', 'a.http', '### a');
+    await vi.advanceTimersByTimeAsync(400);
+
     const session = readSession();
-    expect(session.activeTabPath).toBe('/ws/requests.http');
-    expect(session.tabs.map((t) => t.path)).toEqual(['/ws/requests.http']);
+    expect(session.activeTabPath).toBe('/ws/a.http');
+    expect(session.tabs.map((t) => t.path)).toEqual(['/ws/a.http']);
     wrapper.unmount();
   });
 
@@ -163,6 +173,7 @@ describe('session persistence', () => {
     await flushPromises();
 
     const ws = useWorkspaceStore();
+    ws.openFile('/ws/a.http', 'a.http', '### init');
     ws.updateActiveContent('### latest');
     ws.markDirty();
 
@@ -178,7 +189,7 @@ describe('session persistence', () => {
     wrapper.unmount();
   });
 
-  it('restores the previous session instead of bootstrapping the default file', async () => {
+  it('restores the previous session without writing any file', async () => {
     vfs.files.set('/ws/a.http', '### from disk');
     localStorage.setItem(SESSION_KEY, JSON.stringify({
       tabs: [
@@ -197,7 +208,7 @@ describe('session persistence', () => {
     expect(ws.getTab('/ws/a.http')!.content).toBe('### from disk');
     expect(ws.getTab('/ws/b.http')!.content).toBe('### unsaved');
     expect(useRequestStore().source).toBe('### from disk');
-    expect(vfs.calls).not.toContain('write:/ws/requests.http');
+    expect(vfs.calls.filter((c) => c.startsWith('write:'))).toEqual([]);
     wrapper.unmount();
   });
 });

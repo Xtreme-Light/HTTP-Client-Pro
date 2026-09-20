@@ -154,7 +154,7 @@ function hasChildren(node: HtmlNode): boolean {
 <style scoped>
 .html-tree {
   font-family: var(--font-editor);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.6;
   background: var(--bg-input-deep);
   border: 1px solid var(--border-block);
@@ -178,7 +178,7 @@ function hasChildren(node: HtmlNode): boolean {
   border-radius: 3px;
   background: var(--bg-input);
   color: var(--fg-secondary);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   cursor: pointer;
 }
 
@@ -236,6 +236,6 @@ function hasChildren(node: HtmlNode): boolean {
 .html-tree-error {
   padding: 16px;
   color: var(--danger);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 </style>

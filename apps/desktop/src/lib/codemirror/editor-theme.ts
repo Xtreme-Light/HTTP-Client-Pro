@@ -16,10 +16,16 @@ const EDITOR_FONT_FAMILY = 'var(--font-editor)';
 /** 统一行高 — 行号 gutter 与编辑区内容共用，保证每行等高且左右垂直居中对齐 */
 export const EDITOR_LINE_HEIGHT = '1.6';
 
+/**
+ * 字号跟随设置中的「字体大小」（--font-scale 由 stores/settings.ts 写入）。
+ * 仅用于真实文本；▶ / √ / ✕ 这类图标字形保持固定尺寸，避免撑破 gutter 按钮。
+ */
+const fs = (px: number) => `calc(${px}px * var(--font-scale, 1))`;
+
 export function buildEditorTheme(scheme: EditorScheme): Extension {
   const s = scheme.syntax;
   return EditorView.theme({
-    '&': { height: '100%', fontSize: '14px' },
+    '&': { height: '100%', fontSize: fs(14) },
     '.cm-scroller': {
       fontFamily: EDITOR_FONT_FAMILY,
       overflow: 'auto',
@@ -46,7 +52,7 @@ export function buildEditorTheme(scheme: EditorScheme): Extension {
     },
     '.cm-lineNumbers .cm-gutterElement': {
       padding: '0 8px',
-      fontSize: '14px',
+      fontSize: fs(14),
       minWidth: '3em',
       // 以行为盒模型中线为基准垂直居中，与右侧内容对齐
       display: 'flex',
@@ -170,7 +176,7 @@ export function buildEditorTheme(scheme: EditorScheme): Extension {
     },
     '.cm-tooltip.cm-tooltip-autocomplete > ul': {
       fontFamily: EDITOR_FONT_FAMILY,
-      fontSize: '13px',
+      fontSize: fs(13),
       maxHeight: '16em',
       maxWidth: 'min(560px, 90vw)',
     },

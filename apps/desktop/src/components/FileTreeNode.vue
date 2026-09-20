@@ -73,7 +73,7 @@ function getEntries(path: string): FileEntry[] {
   gap: 4px;
   padding: 2px 8px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--fg);
 }
 
@@ -83,7 +83,7 @@ function getEntries(path: string): FileEntry[] {
 
 .toggle {
   width: 12px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--fg-muted);
   text-align: center;
   flex-shrink: 0;
@@ -95,7 +95,7 @@ function getEntries(path: string): FileEntry[] {
 }
 
 .file-icon {
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   flex-shrink: 0;
 }
 
@@ -107,7 +107,7 @@ function getEntries(path: string): FileEntry[] {
 }
 
 .empty-dir {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--fg-muted);
   font-style: italic;
   padding: 2px 0;

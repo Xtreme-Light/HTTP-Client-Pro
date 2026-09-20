@@ -141,6 +141,12 @@ pnpm install
 pnpm tauri:build    # 输出到仓库根目录 target/release/bundle/（src-tauri 为 Cargo workspace 成员）
 ```
 
+> 发版（更新包签名）构建用 `pnpm tauri:build:release`：额外合并 `src-tauri/tauri.release.conf.json`
+> 打开 `createUpdaterArtifacts`，需要环境变量 `TAURI_SIGNING_PRIVATE_KEY`（`.key` 文件**原文两行**，
+> 含 `untrusted comment:` 行，不要 base64）与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（生成时未设密码则为空串），
+> 产出 `*.sig` 供 `latest.json` 使用。
+> CI 仅在推送 `v*` tag 时走这条路径，普通构建不依赖签名密钥。
+
 ### 前端测试
 
 ```bash

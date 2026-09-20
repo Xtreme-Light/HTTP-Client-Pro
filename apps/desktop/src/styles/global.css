@@ -1,5 +1,31 @@
 /* Global base styles — 主题由 CSS 变量驱动，默认值为暗色主题（与 lib/themes.ts darkBase 一致） */
 
+/* 内置等宽字体 Maple Mono（latin 子集，woff2），随安装包分发，离线可用。
+   许可证：SIL Open Font License 1.1，见 src/assets/fonts/LICENSE-OFL.txt */
+@font-face {
+  font-family: 'Maple Mono';
+  src: url('../assets/fonts/maple-mono-latin-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Maple Mono';
+  src: url('../assets/fonts/maple-mono-latin-400-italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Maple Mono';
+  src: url('../assets/fonts/maple-mono-latin-700-normal.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* 背景层级 */
   --bg-base: #1e1e1e;
@@ -73,8 +99,11 @@
   /* UI 字体栈（由设置写入，默认 Maple Mono 优先） */
   --font-ui: 'Maple Mono', 'Maple Mono NF', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 
-  /* 编辑器 / Console 字体栈（由设置写入，默认内置等宽栈） */
+  /* 编辑器 / 代码块字体栈（由设置写入，默认内置等宽栈） */
   --font-editor: 'Maple Mono', 'Maple Mono NF', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* 全站字号缩放系数（由设置的「字体大小」写入，1 = 13px 基准） */
+  --font-scale: 1;
 
   color-scheme: dark;
 }
@@ -88,7 +117,7 @@
 html, body {
   height: 100%;
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--fg);
   background: var(--bg-base);
 }

@@ -86,7 +86,7 @@ function getTypeBadge(node: TreeNode): string {
 }
 
 .key { color: var(--syn-url); font-weight: 500; }
-.type-badge { color: var(--fg-muted); font-size: 11px; }
+.type-badge { color: var(--fg-muted); font-size: calc(11px * var(--font-scale, 1)); }
 
 .value.string { color: var(--syn-string); }
 .value.number { color: var(--syn-number); }
@@ -97,7 +97,7 @@ function getTypeBadge(node: TreeNode): string {
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-muted);
   opacity: 0;
   transition: opacity 0.15s;

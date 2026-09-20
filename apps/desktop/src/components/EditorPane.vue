@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
-import { Annotation, Compartment, EditorState } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, Prec } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, redo, undo } from '@codemirror/commands';
 import { openSearchPanel, searchKeymap } from '@codemirror/search';
 import { useRequestStore } from '../stores/request';
@@ -16,8 +16,8 @@ import { buildEditorTheme } from '../lib/codemirror/editor-theme';
 import { clearRunStatuses, onRunStatusChange } from '../lib/codemirror/run-status';
 import { blockToCurl } from '../lib/codemirror/http-to-curl';
 import { formatDocumentCommand } from '../lib/codemirror/format';
+import { gotoNextLineCommand } from '../lib/codemirror/commands';
 import { getKeymapScheme } from '../lib/keymaps';
-import { getFs } from '../lib/backend/fs';
 
 const requestStore = useRequestStore();
 const envStore = useEnvironmentStore();
@@ -29,12 +29,18 @@ const { run } = useRunCurrent();
 const editorEl = ref<HTMLElement>();
 let view: EditorView | null = null;
 
-// 运行时可重配置：编辑器主题 + 应用快捷键 + 撤销栈 + 执行状态 gutter + 只读模式
+// 运行时可重配置：编辑器主题 + 应用快捷键 + 撤销栈 + 执行状态 gutter + 只读模式 + 长行折行
 const themeCompartment = new Compartment();
 const keymapCompartment = new Compartment();
 const historyCompartment = new Compartment();
 const runGutterCompartment = new Compartment();
 const readOnlyCompartment = new Compartment();
+const lineWrapCompartment = new Compartment();
+
+/** 构建长行折行扩展（关闭时长行不换行，横向滚动查看） */
+function buildLineWrapExt(wrap: boolean) {
+  return wrap ? [EditorView.lineWrapping] : [];
+}
 
 /** 当前激活标签是否为只读示例 */
 function isExampleActive(): boolean {
@@ -77,15 +83,9 @@ function onRunBlock(e: Event) {
 async function saveCurrentFile() {
   // 只读示例 / 设置标签页不可保存
   if (!workspaceStore.canSave) return;
-  const fs = getFs();
-  const path = workspaceStore.currentFilePath;
-  if (!fs || !path) return;
-  // 取标签页内容：编辑器回写 requestStore 有 100ms 防抖，直接用 source 可能写入旧内容
-  const content = workspaceStore.getTab(path)?.content ?? requestStore.source;
   try {
-    await fs.writeFile(path, content);
-    workspaceStore.markClean();
-    workspaceStore.notifyFsChange();
+    // 未命名标签页由 store 统一保存到默认工作区目录
+    await workspaceStore.saveTab();
   } catch (e) {
     alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -177,10 +177,12 @@ watch(ctxMenu, (open) => {
   }
 });
 
-// 按当前快捷键方案构建应用级编辑器绑定（运行/保存/格式化）
+// 按当前快捷键方案构建应用级编辑器绑定（运行/保存/格式化/跳到下一行）
+// Prec.high：defaultKeymap 在扩展数组里更靠前，优先级更高，
+// 不加 Prec.high 时 Mod-Enter 会被内置的 insertBlankLine 抢先处理。
 function buildAppKeymap() {
   const bindings = getKeymapScheme(settings.keymapScheme).bindings;
-  return keymap.of([
+  return Prec.high(keymap.of([
     {
       key: bindings.runRequest,
       run: () => { run(); return true; },
@@ -195,7 +197,12 @@ function buildAppKeymap() {
       preventDefault: true,
       run: (v) => (isExampleActive() ? true : formatDocumentCommand(v)),
     },
-  ]);
+    {
+      key: bindings.gotoNextLine,
+      preventDefault: true,
+      run: (v) => (isExampleActive() ? true : gotoNextLineCommand(v)),
+    },
+  ]));
 }
 
 // 外部派发的编辑器命令（全局快捷键 / 菜单栏触发）
@@ -238,6 +245,7 @@ onMounted(() => {
     runGutterCompartment.of(runGutter()),
     historyCompartment.of(history()),
     readOnlyCompartment.of(buildReadOnlyExt(isExampleActive())),
+    lineWrapCompartment.of(buildLineWrapExt(settings.editorLineWrap)),
     keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
     keymapCompartment.of(buildAppKeymap()),
     EditorView.updateListener.of((update) => {
@@ -333,11 +341,19 @@ watch(
   },
 );
 
-// 编辑器字体变更（--font-editor 由 settings store 写入）→ 重新测量文本几何
+// 编辑器字体 / 字号变更（--font-editor、--font-scale 由 settings store 写入）→ 重新测量文本几何
 watch(
-  () => settings.editorFontFamily,
+  () => [settings.editorFontFamily, settings.fontScale],
   () => {
     view?.requestMeasure();
+  },
+);
+
+// Editor 行折叠（长行折行）变更 → 重配置折行扩展
+watch(
+  () => settings.editorLineWrap,
+  (wrap) => {
+    view?.dispatch({ effects: lineWrapCompartment.reconfigure(buildLineWrapExt(wrap)) });
   },
 );
 
@@ -418,7 +434,7 @@ watch(
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--fg);
 }
 

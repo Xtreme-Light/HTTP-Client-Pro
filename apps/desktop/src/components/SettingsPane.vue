@@ -10,7 +10,7 @@ import {
   type UiTheme,
 } from '../lib/themes';
 import { KEYMAP_SCHEME_LIST, SHORTCUT_ACTIONS, formatBinding, getKeymapScheme } from '../lib/keymaps';
-import { SYSTEM_FONTS, buildUiFontStack, isFontAvailable } from '../lib/fonts';
+import { FONT_SIZES, SYSTEM_FONTS, buildUiFontStack, isFontAvailable } from '../lib/fonts';
 import {
   UPDATE_SOURCE_LABELS,
   fetchChangelog,
@@ -301,7 +301,15 @@ onMounted(loadAbout);
                   placeholder="自定义字体名称，如 Inter"
                 />
               </div>
-              <p class="field-hint">同时作用于界面、Editor 与 Console；「跟随系统默认」时 Editor/Console 使用内置等宽字体。</p>
+              <p class="field-hint">作用于全部界面文字（含 HISTORY、Console）与 Editor；「跟随系统默认」时 Editor 使用内置等宽字体。</p>
+            </div>
+
+            <div class="field col-6">
+              <label class="field-label">字体大小</label>
+              <select v-model="settings.fontSize" class="select">
+                <option v-for="s in FONT_SIZES" :key="s" :value="s">{{ s }} px</option>
+              </select>
+              <p class="field-hint">以 13px 为基准等比缩放全站文字（界面、Editor、HISTORY、Console）。</p>
             </div>
 
             <div class="field col-6">
@@ -315,7 +323,7 @@ onMounted(loadAbout);
               <p class="field-hint">主字体缺失时按顺序回退；留空则以系统无衬线字体兜底。</p>
             </div>
 
-            <div class="field col-6">
+            <div class="field col-12">
               <label class="field-label">字体预览</label>
               <div class="font-preview" :style="{ fontFamily: previewFontFamily }">
                 <div class="font-preview-main">HTTP Client Pro 界面字体预览 The quick brown fox jumps over the lazy dog.</div>
@@ -325,10 +333,20 @@ onMounted(loadAbout);
           </div>
         </div>
 
-        <!-- ============ 编辑器（占位） ============ -->
+        <!-- ============ 编辑器 ============ -->
         <div v-else-if="activeMenu === 'editor'" class="settings-section">
           <h3>编辑器</h3>
-          <p class="placeholder">编辑器设置暂未实现</p>
+
+          <div class="settings-grid">
+            <div class="field col-6">
+              <label class="field-label">行折叠（长行折行）</label>
+              <select v-model="settings.editorLineWrap" class="select">
+                <option :value="true">开启：超出宽度的内容折行显示</option>
+                <option :value="false">关闭：单行显示，横向滚动查看</option>
+              </select>
+              <p class="field-hint">默认开启。一行内容过长时自动换到下一行展示，不改变文件本身的内容。</p>
+            </div>
+          </div>
         </div>
 
         <!-- ============ 快捷键 ============ -->
@@ -463,7 +481,7 @@ onMounted(loadAbout);
   border: none;
   background: none;
   color: var(--fg-secondary);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -489,7 +507,7 @@ onMounted(loadAbout);
 }
 
 .settings-section h3 {
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale, 1));
   margin: 0 0 16px 0;
   color: var(--fg);
 }
@@ -517,11 +535,6 @@ onMounted(loadAbout);
   }
 }
 
-.placeholder {
-  font-size: 13px;
-  color: var(--fg-muted);
-}
-
 /* ---------- 字段 ---------- */
 .field {
   min-width: 0;
@@ -529,14 +542,14 @@ onMounted(loadAbout);
 
 .field-label {
   display: block;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--fg-secondary);
   margin-bottom: 6px;
 }
 
 .field-hint {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-muted);
   margin-top: 6px;
 }
@@ -552,7 +565,7 @@ onMounted(loadAbout);
   border-radius: 4px;
   background: var(--bg-input);
   color: var(--fg);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 28px;
   outline: none;
 }
@@ -618,7 +631,7 @@ onMounted(loadAbout);
 }
 
 .tp-title {
-  font-size: 9px;
+  font-size: calc(9px * var(--font-scale, 1));
   padding: 2px 6px;
   white-space: nowrap;
   overflow: hidden;
@@ -638,7 +651,7 @@ onMounted(loadAbout);
 }
 
 .tp-item {
-  font-size: 8px;
+  font-size: calc(8px * var(--font-scale, 1));
   padding: 1px 6px;
   white-space: nowrap;
   overflow: hidden;
@@ -652,7 +665,7 @@ onMounted(loadAbout);
 }
 
 .tp-line {
-  font-size: 8px;
+  font-size: calc(8px * var(--font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -668,14 +681,14 @@ onMounted(loadAbout);
 }
 
 .theme-name {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--fg);
   white-space: nowrap;
 }
 
 .theme-source {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--fg-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -689,7 +702,7 @@ onMounted(loadAbout);
   border-radius: 4px;
   border: 1px solid var(--border-block);
   font-family: var(--font-editor);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
@@ -712,13 +725,13 @@ onMounted(loadAbout);
 }
 
 .font-preview-main {
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   color: var(--fg);
   margin-bottom: 4px;
 }
 
 .font-preview-sub {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-muted);
 }
 
@@ -731,7 +744,7 @@ onMounted(loadAbout);
 }
 
 .shortcut-group-title {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 700;
   color: var(--fg-muted);
   text-transform: uppercase;
@@ -746,7 +759,7 @@ onMounted(loadAbout);
 
 .shortcut-table td {
   padding: 5px 8px;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   border-bottom: 1px solid var(--border);
 }
 
@@ -767,7 +780,7 @@ onMounted(loadAbout);
   border-radius: 4px;
   background: var(--bg-input);
   color: var(--fg);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   font-family: var(--font-editor);
 }
 
@@ -785,13 +798,13 @@ onMounted(loadAbout);
 }
 
 .about-name {
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--fg);
 }
 
 .about-version {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-muted);
   margin-top: 2px;
 }
@@ -814,7 +827,7 @@ onMounted(loadAbout);
   border-radius: 4px;
   background: var(--bg-button);
   color: var(--fg-secondary);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
@@ -839,7 +852,7 @@ onMounted(loadAbout);
 }
 
 .changelog-empty {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--fg-muted);
   margin: 4px 0;
 }
@@ -858,27 +871,27 @@ onMounted(loadAbout);
 }
 
 .changelog-tag {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 700;
   color: var(--accent);
   font-family: var(--font-editor);
 }
 
 .changelog-name {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--fg);
 }
 
 .changelog-date {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-muted);
   margin-left: auto;
 }
 
 .changelog-body {
   margin: 6px 0 0 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
@@ -900,7 +913,7 @@ onMounted(loadAbout);
 
 .dirty-hint {
   margin-right: auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--warning);
 }
 
@@ -913,7 +926,7 @@ onMounted(loadAbout);
   background: var(--bg-button);
   color: var(--fg-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   transition: background 0.15s, border-color 0.15s;
 }
 

@@ -133,13 +133,13 @@ async function onInstall() {
 }
 
 .modal h3 {
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale, 1));
   margin: 0 0 8px 0;
   color: var(--fg);
 }
 
 .modal-text {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--fg-secondary);
   line-height: 1.6;
   margin: 0 0 12px 0;
@@ -147,7 +147,7 @@ async function onInstall() {
 
 .notes-label {
   display: block;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--fg-muted);
   margin-bottom: 4px;
@@ -164,7 +164,7 @@ async function onInstall() {
   background: var(--bg-input);
   color: var(--fg);
   font-family: var(--font-editor);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   line-height: 1.6;
   outline: none;
 }
@@ -203,14 +203,14 @@ async function onInstall() {
 }
 
 .progress-text {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-muted);
   white-space: nowrap;
 }
 
 .error-text {
   margin: 10px 0 0 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--danger);
   word-break: break-all;
 }
@@ -230,7 +230,7 @@ async function onInstall() {
   background: var(--bg-button);
   color: var(--fg-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   transition: background 0.15s, border-color 0.15s;
 }
 

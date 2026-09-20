@@ -34,14 +34,14 @@ export const SYSTEM_FONTS: SystemFontDef[] = [
   { name: 'Fira Code', hint: '等宽' },
   { name: 'Cascadia Code', hint: 'Windows' },
   { name: 'Consolas', hint: 'Windows' },
-  { name: 'Maple Mono', hint: '等宽' },
+  { name: 'Maple Mono', hint: '内置等宽' },
 ];
 
-/** 未自定义字体时的默认 UI 字体栈（Maple Mono 优先，缺失时回退系统无衬线） */
+/** 未自定义字体时的默认 UI 字体栈（内置 Maple Mono 优先；中文字形由其后的系统字体兜底） */
 export const DEFAULT_UI_FONT_STACK =
   '"Maple Mono", "Maple Mono NF", -apple-system, BlinkMacSystemFont, \'Segoe UI\', system-ui, sans-serif';
 
-/** 未自定义字体时的默认编辑器/等宽字体栈 */
+/** 未自定义字体时的默认编辑器/等宽字体栈（内置 Maple Mono 优先） */
 export const DEFAULT_EDITOR_FONT_STACK =
   '"Maple Mono", "Maple Mono NF", ui-monospace, SFMono-Regular, Menlo, monospace';
 
@@ -133,7 +133,26 @@ export function buildUiFontStack(primary: string, fallback: string): string {
   return buildFontStack(primary, fallback, DEFAULT_UI_FONT_STACK, 'sans-serif');
 }
 
-/** 构建编辑器/Console 字体栈（空则回退到内置等宽栈） */
+/** 构建编辑器/代码块字体栈（空则回退到内置等宽栈） */
 export function buildEditorFontStack(primary: string, fallback: string): string {
   return buildFontStack(primary, fallback, DEFAULT_EDITOR_FONT_STACK, 'monospace');
 }
+
+/** 基准字号：global.css 中 html/body 的原始 font-size */
+export const BASE_FONT_SIZE = 13;
+
+/** 可选字号（px） */
+export const FONT_SIZES = [12, 13, 14, 15, 16, 18];
+
+/** 未设置字号时的默认值 */
+export const DEFAULT_FONT_SIZE = BASE_FONT_SIZE;
+
+/**
+ * 由字号计算全局缩放系数（写入 CSS 变量 --font-scale）。
+ * 全站样式以 `calc(Npx * var(--font-scale, 1))` 表达字号，因此改一处即可整体缩放。
+ */
+export function buildFontScale(size: number): number {
+  if (!Number.isFinite(size) || size <= 0) return 1;
+  return Math.round((size / BASE_FONT_SIZE) * 1000) / 1000;
+}
+

@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import { useRequestStore } from './request';
 import { normalizePath } from '../lib/path';
 import { getExample } from '../lib/examples';
+import { getFs } from '../lib/backend/fs';
 
 export interface WorkspaceRoot {
   id: string;
@@ -30,6 +31,13 @@ const STORAGE_KEY = 'http-client-pro:workspaces';
 const CURRENT_FILE_KEY = 'http-client-pro:current-file';
 const SESSION_KEY = 'http-client-pro:session';
 const SETTINGS_TAB_PATH = '__settings__';
+/** 未保存的临时标签页路径格式 */
+const UNTITLED_RE = /^untitled-\d+$/;
+
+/** 是否为未命名临时标签页路径 */
+export function isUntitledPath(path: string): boolean {
+  return UNTITLED_RE.test(path);
+}
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const roots = ref<WorkspaceRoot[]>([]);
@@ -233,6 +241,73 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     requestStore.setSource(example.content);
   }
 
+  /** 新建未命名标签页（Untitled.http）— 保存时写入默认工作区目录 */
+  function createUntitledTab() {
+    let n = 1;
+    while (indexOfTab(`untitled-${n}`) !== -1) n++;
+    const path = `untitled-${n}`;
+    openFile(path, n === 1 ? 'Untitled.http' : `Untitled-${n}.http`, '');
+  }
+
+  /** 默认工作区目录：优先取非软链接的根（Default），否则第一个根，最后回退到后端默认路径 */
+  async function defaultWorkspaceDir(): Promise<string> {
+    const root = roots.value.find((r) => !r.isLinked) ?? roots.value[0];
+    if (root) return root.path;
+    const fs = getFs();
+    if (!fs) throw new Error('No workspace available');
+    return fs.getDefaultWorkspace();
+  }
+
+  /** 在目录下生成不冲突的 Untitled 文件名（Untitled.http / Untitled-2.http …） */
+  async function uniqueUntitledName(dir: string, name: string): Promise<string> {
+    const fs = getFs()!;
+    const fileName = /\.[^./\\]+$/.test(name) ? name : `${name}.http`;
+    const dot = fileName.lastIndexOf('.');
+    const base = fileName.slice(0, dot);
+    const ext = fileName.slice(dot);
+    const exists = async (p: string) => {
+      try { await fs.readFile(p); return true; } catch { return false; }
+    };
+    let candidate = fileName;
+    let n = 2;
+    while (await exists(`${dir}/${candidate}`)) {
+      candidate = `${base}-${n}${ext}`;
+      n++;
+    }
+    return candidate;
+  }
+
+  /**
+   * 保存标签页（缺省为当前激活标签）到磁盘，失败时抛出异常由调用方提示。
+   * 未命名标签页保存到默认工作区目录，并原地转为正式文件标签页。
+   * 返回是否执行了保存（非文件标签页 / 无后端时返回 false）。
+   */
+  async function saveTab(path?: string | null): Promise<boolean> {
+    const fs = getFs();
+    if (!fs) return false;
+    const tab = getTab(path ?? activeTabPath.value ?? '');
+    if (!tab || tab.type !== 'file') return false;
+
+    if (isUntitledPath(tab.path)) {
+      const dir = await defaultWorkspaceDir();
+      const fileName = await uniqueUntitledName(dir, tab.name);
+      const fullPath = `${dir}/${fileName}`;
+      await fs.writeFile(fullPath, tab.content);
+      // 先打开新文件标签再关闭临时标签，保持激活焦点不跳动
+      openFile(fullPath, fileName, tab.content);
+      closeTab(tab.path);
+      markTabClean(fullPath);
+      notifyFsChange();
+      return true;
+    }
+
+    // 取标签页的最新内容（编辑器回写 requestStore 有防抖延迟）
+    await fs.writeFile(tab.path, tab.content);
+    markTabClean(tab.path);
+    notifyFsChange();
+    return true;
+  }
+
   /** 保存当前现场（已打开的标签页及其内容 / 激活标签）— 程序退出时调用 */
   function saveSession() {
     try {
@@ -297,6 +372,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     load, persist, addRoot, removeRoot, notifyFsChange,
     openFile, closeTab, switchTab, updateActiveContent,
     markDirty, markClean, markTabClean, getTab, openSettings, openExample,
+    createUntitledTab, saveTab,
     saveSession, restoreSession,
   };
 });

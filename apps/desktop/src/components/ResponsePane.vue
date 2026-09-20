@@ -178,7 +178,7 @@ const requestText = computed(() => item.value?.source ?? '');
   padding: 2px 10px;
   border-radius: 12px;
   font-weight: 700;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 
 .status-2xx { background: var(--chip-safe-bg); color: var(--chip-safe-fg); }
@@ -186,11 +186,11 @@ const requestText = computed(() => item.value?.source ?? '');
 .status-4xx { background: var(--chip-warn-bg); color: var(--chip-warn-fg); }
 .status-5xx { background: var(--chip-danger-bg); color: var(--chip-danger-fg); }
 
-.elapsed { font-size: 12px; color: var(--fg-muted); }
+.elapsed { font-size: calc(12px * var(--font-scale, 1)); color: var(--fg-muted); }
 
 .url {
   font-family: var(--font-editor);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -209,7 +209,7 @@ const requestText = computed(() => item.value?.source ?? '');
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-muted);
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
@@ -236,8 +236,9 @@ const requestText = computed(() => item.value?.source ?? '');
   border-radius: 6px;
   padding: 8px;
   overflow: auto;
-  font-size: 12px;
-  font-family: var(--font-editor);
+  font-size: calc(12px * var(--font-scale, 1));
+  /* 跟随界面字体设置（--font-ui），与 HISTORY 等面板保持一致 */
+  font-family: var(--font-ui);
   white-space: pre-wrap;
   margin: 0;
   min-height: 100%;
@@ -246,14 +247,14 @@ const requestText = computed(() => item.value?.source ?? '');
 
 .idle-content p {
   color: var(--fg-muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 
 kbd {
   padding: 2px 6px;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   background: var(--bg-panel);
 }
 </style>

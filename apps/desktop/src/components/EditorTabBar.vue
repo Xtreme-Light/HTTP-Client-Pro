@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useWorkspaceStore } from '../stores/workspace';
-import { getFs } from '../lib/backend/fs';
 
 const workspaceStore = useWorkspaceStore();
 
@@ -10,6 +9,12 @@ const unsavedDialog = ref<{ path: string; name: string } | null>(null);
 
 function onTabClick(path: string) {
   workspaceStore.switchTab(path);
+}
+
+/** 双击标签栏空白区域 → 立即新建 Untitled.http 标签页 */
+function onBarDblClick(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest('.editor-tab')) return;
+  workspaceStore.createUntitledTab();
 }
 
 function onTabClose(path: string) {
@@ -41,27 +46,22 @@ function onDialogDontSave() {
 async function onDialogSave() {
   if (!unsavedDialog.value) return;
   const { path } = unsavedDialog.value;
-  const fs = getFs();
-  if (fs) {
-    try {
-      const tab = workspaceStore.getTab(path);
-      if (tab) {
-        await fs.writeFile(path, tab.content);
-        workspaceStore.markTabClean(path);
-        workspaceStore.notifyFsChange();
-      }
-    } catch (e) {
-      alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
-      return;
-    }
+  try {
+    // 未命名标签页由 store 保存到默认工作区并转为正式文件标签（原标签已关闭）
+    await workspaceStore.saveTab(path);
+  } catch (e) {
+    alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
+    return;
   }
-  workspaceStore.closeTab(path);
+  if (workspaceStore.getTab(path)) {
+    workspaceStore.closeTab(path);
+  }
   unsavedDialog.value = null;
 }
 </script>
 
 <template>
-  <div class="editor-tab-bar">
+  <div class="editor-tab-bar" title="双击空白处新建 Untitled.http" @dblclick="onBarDblClick">
     <div class="tabs-scroll">
       <div
         v-for="tab in workspaceStore.tabs"
@@ -130,7 +130,7 @@ async function onDialogSave() {
   padding: 0 8px;
   height: 30px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-muted);
   white-space: nowrap;
   border-right: 1px solid var(--border);
@@ -166,7 +166,7 @@ async function onDialogSave() {
 
 .tab-dirty {
   color: var(--warning);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   flex-shrink: 0;
 }
 
@@ -179,8 +179,9 @@ async function onDialogSave() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  /* 关闭按钮里的 × 是字形，随字号一起缩放，避免大字号时溢出 */
+  width: calc(16px * var(--font-scale, 1));
+  height: calc(16px * var(--font-scale, 1));
   border: none;
   background: none;
   color: var(--fg-muted);
@@ -219,13 +220,13 @@ async function onDialogSave() {
 }
 
 .modal h3 {
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   margin: 0 0 12px 0;
   color: var(--fg);
 }
 
 .modal-text {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--fg-secondary);
   line-height: 1.6;
   margin: 0 0 16px 0;
@@ -244,7 +245,7 @@ async function onDialogSave() {
   background: var(--bg-button);
   color: var(--fg-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   transition: background 0.15s, border-color 0.15s;
 }
 

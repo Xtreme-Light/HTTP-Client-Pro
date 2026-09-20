@@ -7,7 +7,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useRequestStore } from './stores/request';
 import { useHistoryStore } from './stores/history';
 import { useEnvironmentStore } from './stores/environment';
-import { useWorkspaceStore } from './stores/workspace';
+import { useWorkspaceStore, isUntitledPath } from './stores/workspace';
 import { useSettingsStore } from './stores/settings';
 import { setBackendAdapter, useRunCurrent } from './composables/useRunCurrent';
 import { detectAdapter } from './lib/backend';
@@ -38,9 +38,6 @@ const settings = useSettingsStore();
 const showSidebar = ref(true);
 const { run } = useRunCurrent();
 
-/** 未保存的临时标签页路径格式 */
-const UNTITLED_RE = /^untitled-\d+$/;
-
 onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown);
   // 浏览器环境的兜底：Tauri 关窗不一定触发 beforeunload，另见 registerCloseHook
@@ -55,7 +52,6 @@ onMounted(async () => {
   historyStore.load();
   envStore.load();
   workspaceStore.load();
-  requestStore.setSource(requestStore.source);
 
   // 启动后静默检查更新（跳过已忽略的版本）
   if (isTauri()) {
@@ -63,33 +59,13 @@ onMounted(async () => {
   }
 
   const fs = getFs();
-  // 优先恢复上次退出现场；恢复失败（首次启动 / 数据损坏）走默认文件初始化
+  // 优先恢复上次退出现场；无会话（全新安装 / 数据损坏）时保持空白编辑器，
+  // 不创建任何默认文件；Default 工作区根由 WorkspaceSidebar 挂载时初始化。
   const restored = workspaceStore.restoreSession();
-  if (fs && restored) await refreshCleanTabsFromDisk();
-
-  if (fs && !restored && !workspaceStore.currentFilePath) {
-    try {
-      const defaultPath = await fs.getDefaultWorkspace();
-      if (workspaceStore.roots.length === 0) {
-        workspaceStore.addRoot(defaultPath, 'Default');
-      }
-      const defaultFile = `${defaultPath}/requests.http`;
-      let existingContent: string | null = null;
-      try {
-        existingContent = await fs.readFile(defaultFile);
-      } catch { /* file not found */ }
-      if (existingContent === null) {
-        await fs.writeFile(defaultFile, requestStore.source);
-        workspaceStore.notifyFsChange();
-        workspaceStore.openFile(defaultFile, 'requests.http', requestStore.source);
-      } else if (existingContent.length > 0) {
-        workspaceStore.openFile(defaultFile, 'requests.http', existingContent);
-      } else {
-        workspaceStore.openFile(defaultFile, 'requests.http', requestStore.source);
-      }
-    } catch (e) {
-      console.error('Failed to init default file:', e);
-    }
+  if (fs && restored) {
+    await refreshCleanTabsFromDisk();
+  } else if (!restored && workspaceStore.tabs.length === 0) {
+    requestStore.setSource('');
   }
 });
 
@@ -182,18 +158,9 @@ function contentToSave(path: string): string {
 
 async function saveFile() {
   if (!workspaceStore.canSave) return;
-  const path = workspaceStore.currentFilePath;
-  // 未命名的临时标签页 → 走「另存为」流程
-  if (path && UNTITLED_RE.test(path)) {
-    await saveAs();
-    return;
-  }
-  const fs = getFs();
-  if (!fs || !path) return;
   try {
-    await fs.writeFile(path, contentToSave(path));
-    workspaceStore.markClean();
-    workspaceStore.notifyFsChange();
+    // 未命名标签页由 store 统一保存到默认工作区目录
+    await workspaceStore.saveTab();
   } catch (e) {
     alert(`Failed to save: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -203,10 +170,10 @@ async function saveAs() {
   const fs = getFs();
   if (!fs) return;
   const prevPath = workspaceStore.currentFilePath;
-  const canUsePrev = prevPath && workspaceStore.canSave && !UNTITLED_RE.test(prevPath);
+  const canUsePrev = prevPath && workspaceStore.canSave && !isUntitledPath(prevPath);
   const fallback = workspaceStore.roots.length > 0
-    ? `${workspaceStore.roots[0].path}/requests.http`
-    : '~/requests.http';
+    ? `${workspaceStore.roots[0].path}/Untitled.http`
+    : '~/Untitled.http';
   const name = prompt('Save as (full path):', canUsePrev ? prevPath : fallback);
   if (!name) return;
   const content = prevPath ? contentToSave(prevPath) : requestStore.source;
@@ -215,7 +182,7 @@ async function saveAs() {
     const parts = name.split('/');
     workspaceStore.openFile(name, parts[parts.length - 1] || name, content);
     // 「另存为」成功后关闭来源的未命名标签页
-    if (prevPath && UNTITLED_RE.test(prevPath)) {
+    if (prevPath && isUntitledPath(prevPath)) {
       workspaceStore.closeTab(prevPath);
     }
     // 目标标签页内容与已写入内容一致时才标记为已保存
@@ -228,12 +195,9 @@ async function saveAs() {
   }
 }
 
-/** 新建文件：创建一个未命名标签页（保存时转入「另存为」流程） */
+/** 新建文件：创建一个未命名标签页（保存时写入默认工作区目录） */
 function newFile() {
-  let n = 1;
-  while (workspaceStore.getTab(`untitled-${n}`)) n++;
-  const path = `untitled-${n}`;
-  workspaceStore.openFile(path, `${path}.http`, '');
+  workspaceStore.createUntitledTab();
 }
 
 /** 打开文件：弹出文件选择对话框并载入标签页 */

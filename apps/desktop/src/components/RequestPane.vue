@@ -217,7 +217,7 @@ const queryParams = computed(() => {
   border-radius: 4px;
   background: var(--bg-input);
   color: var(--fg);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-weight: 700;
   cursor: pointer;
 }
@@ -233,7 +233,7 @@ const queryParams = computed(() => {
   border-radius: 4px;
   background: var(--bg-input);
   color: var(--fg);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-family: var(--font-editor);
   outline: none;
 }
@@ -250,7 +250,7 @@ const queryParams = computed(() => {
   background: var(--success);
   color: var(--success-fg);
   font-weight: 600;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.15s;
@@ -260,7 +260,7 @@ const queryParams = computed(() => {
 
 .block-name {
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--syn-keyword);
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
@@ -277,7 +277,7 @@ const queryParams = computed(() => {
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-muted);
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
@@ -316,7 +316,7 @@ const queryParams = computed(() => {
   border-radius: 3px;
   background: var(--bg-input);
   color: var(--fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-family: var(--font-editor);
 }
 
@@ -327,7 +327,7 @@ const queryParams = computed(() => {
   border-radius: 3px;
   background: var(--bg-input);
   color: var(--fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-family: var(--font-editor);
 }
 
@@ -338,7 +338,7 @@ const queryParams = computed(() => {
   background: var(--bg-input);
   color: var(--danger);
   cursor: pointer;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   line-height: 1;
 }
 
@@ -352,7 +352,7 @@ const queryParams = computed(() => {
   background: var(--bg-panel);
   color: var(--focus);
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   width: 100%;
   text-align: center;
 }
@@ -367,7 +367,7 @@ const queryParams = computed(() => {
   border-radius: 4px;
   background: var(--bg-input-deep);
   color: var(--fg);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   font-family: var(--font-editor);
   resize: vertical;
   outline: none;
@@ -383,7 +383,7 @@ const queryParams = computed(() => {
   padding: 6px 8px;
   background: var(--bg-panel);
   border-radius: 4px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   display: flex;
   gap: 6px;
   align-items: center;
@@ -397,14 +397,14 @@ const queryParams = computed(() => {
 .handler-info code {
   font-family: var(--font-editor);
   color: var(--syn-url);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
 }
 
 .params-view { padding: 4px; }
 
 .hint {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   margin-bottom: 8px;
 }
 
@@ -420,7 +420,7 @@ const queryParams = computed(() => {
   padding: 3px 6px;
   background: var(--bg-panel);
   border-radius: 3px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-family: var(--font-editor);
 }
 
@@ -433,6 +433,6 @@ const queryParams = computed(() => {
   justify-content: center;
   height: 100%;
   color: var(--fg-muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
 }
 </style>

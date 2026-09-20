@@ -72,7 +72,7 @@ const methodClass = computed(() => {
 .method-chip {
   padding: 2px 10px;
   border-radius: 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 700;
   white-space: nowrap;
 }
@@ -84,7 +84,7 @@ const methodClass = computed(() => {
 
 .target {
   font-family: var(--font-editor);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -93,7 +93,7 @@ const methodClass = computed(() => {
 
 .block-name {
   color: var(--syn-keyword);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   white-space: nowrap;
 }
 

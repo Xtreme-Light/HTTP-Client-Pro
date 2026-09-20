@@ -70,13 +70,25 @@ jobs:
       # src-tauri 是仓库根 Cargo workspace 的成员，产物位于
       # 仓库根目录的 target/release/bundle/
       # （Linux: deb/rpm/appimage；Windows: msi/nsis）。
-      # createUpdaterArtifacts 已开启：需要 TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)
-      # secrets 对更新包签名，产出 *.sig 供 latest.json 使用。
+      # 非 tag 构建不合并 tauri.release.conf.json（createUpdaterArtifacts
+      # 保持关闭），因此不需要签名密钥，main / PR 构建不会因 secrets 缺失失败。
       - name: Build Tauri app
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: pnpm tauri:build
+
+      # 仅打 v* tag 发版时启用更新包签名：额外合并
+      # src-tauri/tauri.release.conf.json 打开 createUpdaterArtifacts，
+      # 需要 TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) secrets，
+      # 产出 *.sig 供 release job 生成 latest.json。
+      # 注意：TAURI_SIGNING_PRIVATE_KEY 的值是 .key 文件的原文两行
+      # （含 "untrusted comment:" 行），不要 base64；私钥未设密码时
+      # TAURI_SIGNING_PRIVATE_KEY_PASSWORD 无需配置，secrets 缺省展开为空串即可。
+      - name: Build Tauri app (signed for release)
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm tauri:build
+        run: pnpm tauri:build:release
 
       - name: Upload bundle artifacts
         uses: actions/upload-artifact@v4
@@ -145,10 +157,29 @@ jobs:
           print(json.dumps({k: v["url"] for k, v in platforms.items()}, indent=2))
           EOF
 
+      # Release 说明取自带注释 tag 的正文（git tag -a 的 message），
+      # 应用内「关于我们 → 更新日志」读取的正是 Release body，
+      # 因此发版前请把本次更新内容写进 tag 注释。
+      - name: Checkout (for tag annotation)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract release notes from tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          git tag -l --format='%(contents)' "$TAG" > release-notes.md || true
+          if [ ! -s release-notes.md ]; then
+            echo "HTTP Client Pro $TAG 发布。" > release-notes.md
+          fi
+          cat release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          name: HTTP Client Pro ${{ github.ref_name }}
+          body_path: release-notes.md
           files: |
             artifacts/**/*.deb
             artifacts/**/*.rpm

@@ -48,15 +48,32 @@ beforeEach(() => {
 });
 
 describe('WorkspaceSidebar tree freshness', () => {
-  it('shows the default requests.http created by App bootstrap after mount', async () => {
+  it('shows files written externally after expanding the root', async () => {
     const wrapper = mount(WorkspaceSidebar);
     await flushPromises();
 
-    // App.vue 的 onMounted 晚于子组件执行：此时才创建默认文件
     vfs.files.set('/ws/requests.http', '### hello');
 
     await expandDefaultRoot(wrapper);
     expect(wrapper.text()).toContain('requests.http');
+  });
+
+  it('toggles expand/collapse when clicking anywhere on the root row', async () => {
+    const wrapper = mount(WorkspaceSidebar);
+    await flushPromises();
+    vfs.files.set('/ws/a.http', '### a');
+
+    // 点击根目录行（非三角箭头）即可展开
+    await wrapper.find('.root-node').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('a.http');
+    expect(wrapper.find('.root-node .toggle').text()).toBe('▼');
+
+    // 再次点击收起
+    await wrapper.find('.root-node').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('a.http');
+    expect(wrapper.find('.root-node .toggle').text()).toBe('▶');
   });
 
   it('refreshes an already expanded dir on fs change notification', async () => {

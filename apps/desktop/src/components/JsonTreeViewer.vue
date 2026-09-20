@@ -131,7 +131,7 @@ function badgeText(node: TreeNode): string {
 <style scoped>
 .json-tree {
   font-family: var(--font-editor);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   line-height: 1.6;
   background: var(--bg-input-deep);
   border: 1px solid var(--border-block);
@@ -155,7 +155,7 @@ function badgeText(node: TreeNode): string {
   border-radius: 3px;
   background: var(--bg-input);
   color: var(--fg-secondary);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   cursor: pointer;
 }
 
@@ -180,7 +180,7 @@ function badgeText(node: TreeNode): string {
 }
 
 .key { color: var(--syn-url); font-weight: 500; }
-.type-badge { color: var(--fg-muted); font-size: 11px; }
+.type-badge { color: var(--fg-muted); font-size: calc(11px * var(--font-scale, 1)); }
 
 .value.string { color: var(--syn-string); }
 .value.number { color: var(--syn-number); }

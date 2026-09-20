@@ -129,3 +129,28 @@ describe('formatDocument shortcut', () => {
     }
   });
 });
+
+describe('gotoNextLine shortcut', () => {
+  it('is listed in the settings shortcut table under 编辑', () => {
+    const def = SHORTCUT_ACTIONS.find((a) => a.id === 'gotoNextLine');
+    expect(def).toBeDefined();
+    expect(def?.group).toBe('编辑');
+  });
+
+  it('is bound to Ctrl+Enter in every keymap scheme', () => {
+    for (const scheme of KEYMAP_SCHEME_LIST) {
+      expect(scheme.bindings.gotoNextLine, scheme.id).toBe('Mod-Enter');
+      expect(formatBinding(scheme.bindings.gotoNextLine)).toBe('Ctrl+Enter');
+      expect(
+        eventMatchesBinding(ev({ key: 'Enter', ctrlKey: true }), scheme.bindings.gotoNextLine),
+        scheme.id,
+      ).toBe(true);
+    }
+  });
+
+  it('no longer shares Ctrl+Enter with 运行请求', () => {
+    for (const scheme of KEYMAP_SCHEME_LIST) {
+      expect(scheme.bindings.runRequest, scheme.id).not.toBe('Mod-Enter');
+    }
+  });
+});

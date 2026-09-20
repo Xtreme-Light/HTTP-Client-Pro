@@ -20,6 +20,7 @@ export type ShortcutAction =
   | 'redo'
   | 'find'
   | 'formatDocument'
+  | 'gotoNextLine'
   | 'zoomIn'
   | 'zoomOut'
   | 'resetZoom';
@@ -47,6 +48,7 @@ export const SHORTCUT_ACTIONS: ShortcutActionDef[] = [
   { id: 'undo', label: '撤销', group: '编辑' },
   { id: 'redo', label: '重做', group: '编辑' },
   { id: 'formatDocument', label: '格式化请求体', group: '编辑' },
+  { id: 'gotoNextLine', label: '跳到下一行（无则新建）', group: '编辑' },
 ];
 
 /** 一套快捷键方案的全部绑定（CodeMirror 格式） */
@@ -63,7 +65,7 @@ export interface KeymapScheme {
 
 /** Windows 风格（内置） */
 const windowsBindings: KeymapBindings = {
-  runRequest: 'Mod-Enter',
+  runRequest: 'Mod-Shift-Enter',
   save: 'Mod-s',
   saveAs: 'Mod-Shift-s',
   newFile: 'Mod-n',
@@ -73,6 +75,7 @@ const windowsBindings: KeymapBindings = {
   redo: 'Mod-y',
   find: 'Mod-f',
   formatDocument: 'Mod-Alt-l',
+  gotoNextLine: 'Mod-Enter',
   zoomIn: 'Mod-=',
   zoomOut: 'Mod--',
   resetZoom: 'Mod-0',
@@ -89,7 +92,6 @@ const vscodeBindings: KeymapBindings = {
 /** JetBrains（IntelliJ IDEA）风格 */
 const jetbrainsBindings: KeymapBindings = {
   ...windowsBindings,
-  runRequest: 'Mod-Enter',
   saveAs: 'Mod-Shift-Alt-s',
   newFile: 'Mod-Alt-n',
   openFile: 'Mod-Shift-o',

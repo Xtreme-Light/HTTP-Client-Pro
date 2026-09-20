@@ -191,7 +191,7 @@ onUnmounted(() => {
   border: none;
   background: transparent;
   color: var(--fg-secondary);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   cursor: pointer;
   border-radius: 4px;
@@ -259,7 +259,7 @@ onUnmounted(() => {
 
 .example-menu-title {
   padding: 4px 12px 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--fg-muted);
   user-select: none;
 }
@@ -272,7 +272,7 @@ onUnmounted(() => {
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
   color: var(--fg);
 }
 

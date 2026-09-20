@@ -103,7 +103,7 @@ function onClear() {
 }
 
 .panel-header h3 {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   text-transform: uppercase;
   color: var(--fg-muted);
   letter-spacing: 0.5px;
@@ -115,7 +115,7 @@ function onClear() {
   border-radius: 3px;
   background: var(--bg-chrome);
   color: var(--danger);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   cursor: pointer;
 }
 
@@ -127,7 +127,7 @@ function onClear() {
   justify-content: center;
   flex: 1;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale, 1));
 }
 
 .history-list {
@@ -163,7 +163,7 @@ function onClear() {
 .method-chip {
   padding: 1px 6px;
   border-radius: 8px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 700;
 }
 
@@ -175,7 +175,7 @@ function onClear() {
 .status-chip {
   padding: 1px 6px;
   border-radius: 8px;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   font-weight: 700;
 }
 
@@ -185,12 +185,12 @@ function onClear() {
 .status-5xx { background: var(--chip-danger-bg); color: var(--chip-danger-fg); }
 
 .elapsed {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale, 1));
   color: var(--fg-muted);
 }
 
 .time {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale, 1));
   color: var(--fg-muted);
   margin-left: auto;
 }
@@ -199,7 +199,7 @@ function onClear() {
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale, 1));
   color: var(--fg-muted);
   padding: 0 4px;
   line-height: 1;
@@ -210,7 +210,7 @@ function onClear() {
 }
 
 .item-name {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale, 1));
   font-weight: 600;
   color: var(--fg);
   overflow: hidden;
@@ -220,8 +220,8 @@ function onClear() {
 }
 
 .item-target {
-  font-size: 11px;
-  font-family: var(--font-editor);
+  font-size: calc(11px * var(--font-scale, 1));
+  /* 跟随界面字体设置（--font-ui），与面板其它文字保持一致 */
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
