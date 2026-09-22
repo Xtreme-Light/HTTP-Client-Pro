@@ -173,6 +173,7 @@ jobs:
           import glob
           import json
           import os
+          import re
           from urllib.parse import quote
 
           tag = os.environ["TAG"]
@@ -181,6 +182,13 @@ jobs:
           def find_one(pattern):
               matches = glob.glob(f"artifacts/**/{pattern}", recursive=True)
               return matches[0] if matches else None
+
+          def asset_name(path):
+              # GitHub 会把资产名中 [A-Za-z0-9._-] 之外的字符（如空格）替换成 "."，
+              # 例如 "HTTP Client Pro_0.4.1_x64-setup.exe" 上传后实际下载地址是
+              # "HTTP.Client.Pro_0.4.1_x64-setup.exe"。latest.json 必须写规范化后的
+              # 名字，否则应用内「检查更新」下载 404。
+              return re.sub(r"[^A-Za-z0-9._-]", ".", os.path.basename(path))
 
           platforms = {}
           for key, pattern in (
@@ -195,7 +203,7 @@ jobs:
                   signature = f.read().strip()
               platforms[key] = {
                   "signature": signature,
-                  "url": f"{base}/{quote(os.path.basename(path))}",
+                  "url": f"{base}/{quote(asset_name(path))}",
               }
 
           data = {
