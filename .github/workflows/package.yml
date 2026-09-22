@@ -1,4 +1,5 @@
-# Tauri 桌面应用打包流水线：在 Linux 与 Windows 上构建并产出安装包。
+# Tauri 桌面应用打包流水线：在 Linux 与 Windows 上构建并产出安装包
+# （Windows 额外产出绿色免安装 zip）。
 # - push 到 main / 提交 PR 时仅构建并上传产物；
 # - 推送 v* tag 或手动触发时，额外创建 GitHub Release。
 name: Package
@@ -69,7 +70,7 @@ jobs:
       # 执行 pnpm --filter desktop tauri:build -> tauri build。
       # src-tauri 是仓库根 Cargo workspace 的成员，产物位于
       # 仓库根目录的 target/release/bundle/
-      # （Linux: deb/rpm/appimage；Windows: msi/nsis）。
+      # （Linux: deb/rpm/appimage；Windows: msi/nsis + 绿色版 zip）。
       # 非 tag 构建不合并 tauri.release.conf.json（createUpdaterArtifacts
       # 保持关闭），因此不需要签名密钥，main / PR 构建不会因 secrets 缺失失败。
       - name: Build Tauri app
@@ -90,6 +91,35 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri:build:release
 
+      # Windows 绿色免安装版：把 release 可执行文件（Tauri 单文件 exe，
+      # WebView2Loader 已静态链接）直接压成 zip，解压即用；
+      # 运行依赖系统的 WebView2 Runtime（Win10 21H2+ / Win11 默认已内置），
+      # 用户数据仍写在 %APPDATA%\pro.http-client.desktop。
+      # 产物放到 target/release/bundle/portable/ 以便随 bundle 一起上传。
+      - name: Package Windows portable zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $config = Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          # 主二进制名：未配置 mainBinaryName 时为 crate 名，配置后为 productName，两者都试一遍。
+          $candidates = @("$($config.productName).exe", 'http-client-pro-desktop.exe')
+          $exe = $candidates |
+            ForEach-Object { Join-Path 'target/release' $_ } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+          if (-not $exe) { throw "release executable not found, tried: $($candidates -join ', ')" }
+
+          $bundleDir = 'target/release/bundle/portable'
+          $staging = Join-Path $bundleDir 'HTTP-Client-Pro'
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item $exe (Join-Path $staging "$($config.productName).exe") -Force
+
+          $zip = Join-Path $bundleDir "HTTP-Client-Pro_$($config.version)_windows-x64-portable.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path $staging -DestinationPath $zip
+          Remove-Item $staging -Recurse -Force
+          Get-Item $zip | Select-Object Name, Length
+
       - name: Upload bundle artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -104,6 +134,28 @@ jobs:
     permissions:
       contents: write
     steps:
+      # checkout 必须排在下载产物之前：actions/checkout 默认 clean: true，
+      # 会对工作区执行 git clean -ffdx，把未跟踪的 artifacts/ 与 latest.json
+      # 一并删掉，导致 Release 只剩 GitHub 自动生成的 Source code 包
+      # （v0.3.0 / v0.4.0 的安装包丢失就是这个原因）。
+      # Release 说明取自带注释 tag 的正文（git tag -a 的 message），
+      # 应用内「关于我们 → 更新日志」读取的正是 Release body，
+      # 因此发版前请把本次更新内容写进 tag 注释。
+      - name: Checkout (for tag annotation)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract release notes from tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          git tag -l --format='%(contents)' "$TAG" > release-notes.md || true
+          if [ ! -s release-notes.md ]; then
+            echo "HTTP Client Pro $TAG 发布。" > release-notes.md
+          fi
+          cat release-notes.md
+
       - name: Download bundle artifacts
         uses: actions/download-artifact@v4
         with:
@@ -157,35 +209,21 @@ jobs:
           print(json.dumps({k: v["url"] for k, v in platforms.items()}, indent=2))
           EOF
 
-      # Release 说明取自带注释 tag 的正文（git tag -a 的 message），
-      # 应用内「关于我们 → 更新日志」读取的正是 Release body，
-      # 因此发版前请把本次更新内容写进 tag 注释。
-      - name: Checkout (for tag annotation)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Extract release notes from tag
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          git tag -l --format='%(contents)' "$TAG" > release-notes.md || true
-          if [ ! -s release-notes.md ]; then
-            echo "HTTP Client Pro $TAG 发布。" > release-notes.md
-          fi
-          cat release-notes.md
-
+      # fail_on_unmatched_files：任一 glob 没匹配到文件就让 job 失败，
+      # 避免再次出现「Release 建好了但一个安装包都没传上去」的静默事故。
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: HTTP Client Pro ${{ github.ref_name }}
           body_path: release-notes.md
+          fail_on_unmatched_files: true
           files: |
             artifacts/**/*.deb
             artifacts/**/*.rpm
             artifacts/**/*.AppImage
             artifacts/**/*.msi
             artifacts/**/*.exe
+            artifacts/**/*.zip
             artifacts/**/*.sig
             latest.json
 

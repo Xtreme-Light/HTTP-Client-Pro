@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/http-core", "crates/http-cli", "crates/http-web", "crates/http-mcp", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.88.0"

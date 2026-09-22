@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "http-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "http-core",
  "httpmock",
@@ -1973,7 +1973,7 @@ dependencies = [
 
 [[package]]
 name = "http-client-pro-desktop"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "http-core",
  "reqwest 0.12.28",
@@ -1990,7 +1990,7 @@ dependencies = [
 
 [[package]]
 name = "http-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2017,7 +2017,7 @@ dependencies = [
 
 [[package]]
 name = "http-mcp"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "http-core",
@@ -2042,7 +2042,7 @@ checksum = "9171a2ea8a68358193d15dd5d70c1c10a2afc3e7e4c5bc92bc9f025cebd7359c"
 
 [[package]]
 name = "http-web"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-stream",
  "axum",
