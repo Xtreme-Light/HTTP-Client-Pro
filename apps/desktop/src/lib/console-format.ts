@@ -7,7 +7,7 @@
  */
 import type { DispatchResponse } from '../types/http';
 
-/** 渲染所需的最小输入（来自 history item）。 */
+/** 渲染所需的最小输入（来自一次运行记录）。 */
 export interface ConsoleInput {
   method: string;
   target: string;

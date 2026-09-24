@@ -631,7 +631,7 @@ fn filename_from_disposition(value: &str) -> Option<String> {
         match key.trim().to_ascii_lowercase().as_str() {
             // RFC 5987 extended parameter: `charset'language'percent-encoded`.
             "filename*" => {
-                let encoded = raw.splitn(2, "''").nth(1).unwrap_or(raw);
+                let encoded = raw.split_once("''").map_or(raw, |(_, rest)| rest);
                 return Some(
                     percent_encoding::percent_decode_str(encoded)
                         .decode_utf8_lossy()

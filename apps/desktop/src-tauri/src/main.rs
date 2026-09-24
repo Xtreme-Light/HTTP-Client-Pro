@@ -232,6 +232,14 @@ fn list_requests(source: String) -> Result<Value, String> {
     Ok(json!({ "requests": requests }))
 }
 
+/// `SystemTime` → 毫秒时间戳（无法获取或早于 UNIX 纪元时为 0）
+fn system_time_to_ms(t: Result<std::time::SystemTime, std::io::Error>) -> u64 {
+    t.ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// 列出目录下的文件和子目录（一层）
 #[tauri::command]
 fn list_dir(path: String) -> Result<Value, String> {
@@ -249,10 +257,22 @@ fn list_dir(path: String) -> Result<Value, String> {
             .map(|t| t.is_dir())
             .unwrap_or(false);
         let full_path = entry.path().to_string_lossy().into_owned();
+        let meta = entry.metadata().ok();
+        let modified_at = meta
+            .as_ref()
+            .map(|m| system_time_to_ms(m.modified()))
+            .unwrap_or(0);
+        // 部分文件系统不提供创建时间 — 回退到修改时间，避免前端排序把它们全部堆到最前/最后
+        let created_at = match meta.as_ref().map(|m| system_time_to_ms(m.created())).unwrap_or(0) {
+            0 => modified_at,
+            v => v,
+        };
         items.push(json!({
             "name": name,
             "path": full_path,
             "isDir": is_dir,
+            "createdAt": created_at,
+            "modifiedAt": modified_at,
         }));
     }
     // 目录在前，按名称排序

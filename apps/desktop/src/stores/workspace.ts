@@ -18,6 +18,10 @@ export interface FileEntry {
   name: string;
   path: string;
   isDir: boolean;
+  /** 创建时间（毫秒时间戳）— 后端在文件系统不支持时回退为修改时间 */
+  createdAt?: number;
+  /** 修改时间（毫秒时间戳） */
+  modifiedAt?: number;
 }
 
 export interface EditorTab {

@@ -8,8 +8,8 @@ import { useRequestStore } from '../stores/request';
 import { useEnvironmentStore } from '../stores/environment';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useSettingsStore } from '../stores/settings';
-import { useHistoryStore } from '../stores/history';
-import { useRunCurrent } from '../composables/useRunCurrent';
+import { useRequestsStore } from '../stores/requests';
+import { setSourceFlusher, useRunCurrent } from '../composables/useRunCurrent';
 import { httpExtensions, runGutter } from '../lib/codemirror/extensions';
 import { targetsOf } from '../lib/codemirror/completions';
 import { buildEditorTheme } from '../lib/codemirror/editor-theme';
@@ -23,7 +23,7 @@ const requestStore = useRequestStore();
 const envStore = useEnvironmentStore();
 const workspaceStore = useWorkspaceStore();
 const settings = useSettingsStore();
-const historyStore = useHistoryStore();
+const requestsStore = useRequestsStore();
 const { run } = useRunCurrent();
 
 const editorEl = ref<HTMLElement>();
@@ -59,6 +59,18 @@ const externalSync = Annotation.define<boolean>();
 // 防抖更新 store
 let updateTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * 立即把编辑器最新内容写回 request store（取消防抖等待）。
+ * 执行请求前调用 — 否则防抖窗口内的编辑还没进 store，
+ * 会按旧源码 / 旧行号定位请求块，表现为 ▶ 要点第二次才发出请求。
+ */
+function flushPendingSource() {
+  if (updateTimer) { clearTimeout(updateTimer); updateTimer = null; }
+  if (!view) return;
+  const src = view.state.sliceDoc();
+  if (src !== requestStore.source) requestStore.setSource(src);
+}
+
 // 执行状态订阅取消函数
 let unsubscribeRunStatus: (() => void) | null = null;
 
@@ -66,6 +78,8 @@ let unsubscribeRunStatus: (() => void) | null = null;
 function onRunBlock(e: Event) {
   const detail = (e as CustomEvent).detail;
   if (detail && typeof detail.line === 'number') {
+    // 先冲刷未写回的编辑，才能按最新行号定位到块
+    flushPendingSource();
     // 找到该行对应的 block
     const lineIdx = detail.line - 1; // CodeMirror 行号 1-based → 0-based
     for (let i = 0; i < requestStore.blocks.length; i++) {
@@ -222,14 +236,14 @@ function onShortcutEvent(e: Event) {
   }
 }
 
-// 补全语料：其它标签页与执行历史里学习到的 URL（当前文档由扩展自行收集）
+// 补全语料：其它标签页与请求集合里学习到的 URL（当前文档由扩展自行收集）
 function knownUrls(): string[] {
   const others = workspaceStore.tabs.filter(
     (t) => t.type === 'file' && t.path !== workspaceStore.activeTabPath,
   );
   return [
     ...others.flatMap((t) => targetsOf(t.content)),
-    ...historyStore.items.map((i) => i.target),
+    ...requestsStore.entries.map((e) => e.target),
   ];
 }
 
@@ -284,6 +298,9 @@ onMounted(() => {
   // 监听行内 Run 按钮事件
   editorEl.value.addEventListener('cm-run-block', onRunBlock);
 
+  // 执行请求前先冲刷防抖中的编辑器内容（工具栏 / 快捷键 / ▶ 按钮共用）
+  setSourceFlusher(flushPendingSource);
+
   // 右键菜单（复制为 cURL）
   editorEl.value.addEventListener('contextmenu', onContextMenu);
 
@@ -302,6 +319,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  setSourceFlusher(null);
   editorEl.value?.removeEventListener('cm-run-block', onRunBlock);
   editorEl.value?.removeEventListener('contextmenu', onContextMenu);
   window.removeEventListener('shortcut:find', onShortcutEvent);

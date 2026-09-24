@@ -5,7 +5,7 @@ import 'splitpanes/dist/splitpanes.css';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useRequestStore } from './stores/request';
-import { useHistoryStore } from './stores/history';
+import { useRequestsStore } from './stores/requests';
 import { useEnvironmentStore } from './stores/environment';
 import { useWorkspaceStore, isUntitledPath } from './stores/workspace';
 import { useSettingsStore } from './stores/settings';
@@ -24,13 +24,13 @@ import EditorPane from './components/EditorPane.vue';
 import EditorTabBar from './components/EditorTabBar.vue';
 import SettingsPane from './components/SettingsPane.vue';
 import ResponsePane from './components/ResponsePane.vue';
-import HistoryPanel from './components/HistoryPanel.vue';
+import RequestPanel from './components/RequestPanel.vue';
 import WorkspaceSidebar from './components/WorkspaceSidebar.vue';
 import TitleBar from './components/TitleBar.vue';
 import UpdateDialog from './components/UpdateDialog.vue';
 
 const requestStore = useRequestStore();
-const historyStore = useHistoryStore();
+const requestsStore = useRequestsStore();
 const envStore = useEnvironmentStore();
 const workspaceStore = useWorkspaceStore();
 const settings = useSettingsStore();
@@ -50,7 +50,7 @@ onMounted(async () => {
   } catch (e) {
     console.error('Failed to detect backend adapter:', e);
   }
-  historyStore.load();
+  requestsStore.load();
   envStore.load();
   workspaceStore.load();
 
@@ -336,7 +336,8 @@ function onGlobalKeydown(e: KeyboardEvent) {
   // 通用
   if (matches('saveAs')) { e.preventDefault(); void saveAs(); return; }
   if (!inEditor && matches('save')) { e.preventDefault(); void saveFile(); return; }
-  if (!inEditor && matches('runRequest')) { e.preventDefault(); void run(); return; }
+  // 编辑器内由 CodeMirror keymap 先处理；其余位置在此触发（如 Requests 面板聚焦时）
+  if (matches('runRequest')) { e.preventDefault(); void run(); return; }
   if (!inEditor && !inNativeEditable && matches('find')) {
     e.preventDefault();
     dispatchEditorCommand('find');
@@ -391,7 +392,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
           <WorkspaceSidebar />
         </Pane>
 
-        <!-- Center: vertical split — editor | history+response area -->
+        <!-- Center: vertical split — editor | requests+response area -->
         <Pane :size="80">
           <Splitpanes class="center-split" horizontal :first-splitter="true">
             <!-- Top: editor -->
@@ -405,13 +406,13 @@ function onGlobalKeydown(e: KeyboardEvent) {
               </div>
             </Pane>
 
-            <!-- Bottom: history | response detail -->
+            <!-- Bottom: requests | response detail -->
             <Pane :size="45" :min="15">
               <Splitpanes class="response-split">
                 <Pane :size="30" :min="15">
                   <div class="pane-container">
                     <div class="pane-body">
-                      <HistoryPanel />
+                      <RequestPanel />
                     </div>
                   </div>
                 </Pane>

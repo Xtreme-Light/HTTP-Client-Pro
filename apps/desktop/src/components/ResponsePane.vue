@@ -1,13 +1,15 @@
 <script setup lang="ts">
+/**
+ * ResponsePane — 展示选中请求的最近一次（或钉住的历史）运行结果。
+ * 执行中显示转圈，失败显示错误，成功显示 Console / Request 两个页签。
+ */
 import { computed, ref, watch } from 'vue';
-import { useHistoryStore } from '../stores/history';
-import { useResponseStore } from '../stores/response';
+import { useRequestsStore } from '../stores/requests';
 import { useSettingsStore } from '../stores/settings';
 import { formatActionBinding } from '../lib/keymaps';
 import { formatConsole } from '../lib/console-format';
 
-const historyStore = useHistoryStore();
-const responseStore = useResponseStore();
+const requestsStore = useRequestsStore();
 const settings = useSettingsStore();
 
 // 运行快捷键拆分（每个按键渲染为 <kbd>）— 随快捷键方案变化
@@ -18,13 +20,14 @@ const runShortcutParts = computed(() =>
 type Tab = 'console' | 'request';
 const activeTab = ref<Tab>('console');
 
-// 当选中的历史记录变化时，默认切换到 console tab
+const entry = computed(() => requestsStore.selectedEntry);
+const run = computed(() => requestsStore.selectedRun);
+
+// 切换选中的请求 / 运行记录时，默认回到 console 页签
 watch(
-  () => historyStore.selectedId,
+  () => [requestsStore.selectedRequestId, requestsStore.selectedRunId],
   () => { activeTab.value = 'console'; },
 );
-
-const item = computed(() => historyStore.selectedItem);
 
 function statusClass(s: number): string {
   if (s >= 200 && s < 300) return 'status-2xx';
@@ -35,42 +38,61 @@ function statusClass(s: number): string {
 
 // console 文本：JetBrains 风格（请求行 + 状态行 + 完整响应头 + body/落盘 + 摘要）
 const consoleText = computed(() => {
-  const it = item.value;
-  if (!it) return '';
+  const r = run.value;
+  if (!r) return '';
   return formatConsole({
-    method: it.method,
-    target: it.target,
-    response: it.response,
+    method: r.method,
+    target: r.target,
+    response: r.response,
   });
 });
 
-// request 文本：展示历史请求的 Editor 源码
-const requestText = computed(() => item.value?.source ?? '');
+// request 文本：该次运行发起时的请求源码快照
+const requestText = computed(() => run.value?.source ?? '');
+
+/** 正在查看钉住的历史运行（而非最近一次） */
+const viewingHistory = computed(
+  () => !!run.value && !!entry.value && run.value.runId !== entry.value.runs[0]?.runId,
+);
+
+function backToLatest() {
+  if (!entry.value) return;
+  requestsStore.viewRun(entry.value.requestId, null);
+}
 </script>
 
 <template>
   <div class="response-pane">
-    <!-- Loading -->
-    <div v-if="responseStore.loading" class="state loading">
-      <span class="spinner" /> Sending request…
+    <!-- 执行中 -->
+    <div v-if="run && run.status === 'running'" class="state loading">
+      <span class="spinner" /> 请求执行中…
     </div>
 
-    <!-- Error -->
-    <div v-else-if="responseStore.error" class="state error">
-      <strong>Error</strong>
-      <pre>{{ responseStore.error }}</pre>
+    <!-- 失败 -->
+    <div v-else-if="run && run.status === 'error'" class="state error">
+      <div v-if="viewingHistory" class="history-bar">
+        <span>正在查看历史运行</span>
+        <button class="link-btn" @click="backToLatest">回到最近一次</button>
+      </div>
+      <strong>错误</strong>
+      <pre>{{ run.error }}</pre>
     </div>
 
-    <!-- Detail content -->
-    <div v-else-if="item" class="response-content">
+    <!-- 成功 -->
+    <div v-else-if="run" class="response-content">
+      <div v-if="viewingHistory" class="history-bar">
+        <span>正在查看历史运行（{{ new Date(run.ts).toLocaleTimeString('zh-CN', { hour12: false }) }}）</span>
+        <button class="link-btn" @click="backToLatest">回到最近一次</button>
+      </div>
+
       <!-- Meta bar -->
       <div class="response-meta">
         <span
-          v-if="item.response"
-          :class="['status-chip', statusClass(item.response.status)]"
-        >{{ item.response.status }}</span>
-        <span class="elapsed">{{ item.elapsedMs }}ms</span>
-        <span class="url">{{ item.target }}</span>
+          v-if="run.httpStatus != null"
+          :class="['status-chip', statusClass(run.httpStatus)]"
+        >{{ run.httpStatus }}</span>
+        <span class="elapsed">{{ run.elapsedMs }}ms</span>
+        <span class="url">{{ run.target }}</span>
       </div>
 
       <!-- Tabs -->
@@ -94,17 +116,17 @@ const requestText = computed(() => item.value?.source ?? '');
       </div>
     </div>
 
-    <!-- Idle -->
+    <!-- 空闲 -->
     <div v-else class="state idle">
       <div class="idle-content">
         <p>
-          Press
+          按
           <template v-for="(p, i) in runShortcutParts" :key="i">
             <kbd>{{ p }}</kbd><span v-if="i < runShortcutParts.length - 1">+</span>
           </template>
-          or click <strong>Send</strong> to execute a request.
+          或点击编辑器中的 <strong>&#9654;</strong> 执行请求。
         </p>
-        <p>Or select an item from <strong>History</strong> to view its response.</p>
+        <p>或在 <strong>Requests</strong> 面板中选择一个请求查看其响应。</p>
       </div>
     </div>
   </div>
@@ -140,6 +162,8 @@ const requestText = computed(() => item.value?.source ?? '');
   flex-direction: column;
   align-items: flex-start;
   color: var(--danger);
+  flex: 1;
+  overflow: auto;
 }
 
 .state.error pre {
@@ -151,6 +175,7 @@ const requestText = computed(() => item.value?.source ?? '');
 .spinner {
   width: 16px;
   height: 16px;
+  flex: none;
   border: 2px solid var(--border-strong);
   border-top-color: var(--focus);
   border-radius: 50%;
@@ -158,6 +183,28 @@ const requestText = computed(() => item.value?.source ?? '');
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.history-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  font-size: calc(11px * var(--font-scale, 1));
+  color: var(--fg-muted);
+}
+
+.link-btn {
+  border: none;
+  background: none;
+  color: var(--focus);
+  cursor: pointer;
+  font-size: calc(11px * var(--font-scale, 1));
+  padding: 0;
+}
 
 .response-content {
   display: flex;
@@ -237,7 +284,7 @@ const requestText = computed(() => item.value?.source ?? '');
   padding: 8px;
   overflow: auto;
   font-size: calc(12px * var(--font-scale, 1));
-  /* 跟随界面字体设置（--font-ui），与 HISTORY 等面板保持一致 */
+  /* 跟随界面字体设置（--font-ui），与 REQUESTS 等面板保持一致 */
   font-family: var(--font-ui);
   white-space: pre-wrap;
   margin: 0;

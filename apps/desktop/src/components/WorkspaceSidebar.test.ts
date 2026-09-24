@@ -4,15 +4,28 @@ import { createPinia, setActivePinia } from 'pinia';
 import { useWorkspaceStore } from '../stores/workspace';
 
 /** 内存虚拟文件系统 — 模拟 Tauri 侧的 read_dir / read_file / write_file */
-const vfs = vi.hoisted(() => ({ files: new Map<string, string>() }));
+const vfs = vi.hoisted(() => ({
+  files: new Map<string, string>(),
+  /** 可选的时间戳元数据，用于验证按创建/修改时间排序 */
+  meta: new Map<string, { createdAt?: number; modifiedAt?: number }>(),
+}));
 
 vi.mock('../lib/backend/fs', () => ({
   getFs: () => ({
     async listDir(path: string) {
-      const items: { name: string; path: string; isDir: boolean }[] = [];
+      const items: {
+        name: string; path: string; isDir: boolean; createdAt?: number; modifiedAt?: number;
+      }[] = [];
       for (const p of vfs.files.keys()) {
         if (p.substring(0, p.lastIndexOf('/')) === path) {
-          items.push({ name: p.slice(p.lastIndexOf('/') + 1), path: p, isDir: false });
+          const meta = vfs.meta.get(p);
+          items.push({
+            name: p.slice(p.lastIndexOf('/') + 1),
+            path: p,
+            isDir: false,
+            createdAt: meta?.createdAt,
+            modifiedAt: meta?.modifiedAt,
+          });
         }
       }
       return items;
@@ -41,10 +54,16 @@ async function expandDefaultRoot(wrapper: ReturnType<typeof mount>) {
   await flushPromises();
 }
 
+/** 当前渲染出来的文件顺序（不含根目录行） */
+function renderedNames(wrapper: ReturnType<typeof mount>): string[] {
+  return wrapper.findAll('.children .tree-node .name').map((n) => n.text());
+}
+
 beforeEach(() => {
   setActivePinia(createPinia());
   localStorage.clear();
   vfs.files.clear();
+  vfs.meta.clear();
 });
 
 describe('WorkspaceSidebar tree freshness', () => {
@@ -88,5 +107,73 @@ describe('WorkspaceSidebar tree freshness', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('saved.http');
+  });
+});
+
+describe('WorkspaceSidebar file sorting', () => {
+  it('sorts by name descending by default', async () => {
+    vfs.files.set('/ws/20260923.http', '');
+    vfs.files.set('/ws/20260924xxx.http', '');
+    const wrapper = mount(WorkspaceSidebar);
+    await flushPromises();
+    await expandDefaultRoot(wrapper);
+
+    expect(renderedNames(wrapper)).toEqual(['20260924xxx.http', '20260923.http']);
+  });
+
+  it('switches to ascending when clicking the order button', async () => {
+    vfs.files.set('/ws/20260923.http', '');
+    vfs.files.set('/ws/20260924xxx.http', '');
+    const wrapper = mount(WorkspaceSidebar);
+    await flushPromises();
+    await expandDefaultRoot(wrapper);
+
+    await wrapper.find('.sort-order-btn').trigger('click');
+    await flushPromises();
+
+    expect(renderedNames(wrapper)).toEqual(['20260923.http', '20260924xxx.http']);
+    expect(wrapper.find('.sort-order-btn').text()).toBe('↑');
+  });
+
+  it('sorts by modified time when that field is selected', async () => {
+    vfs.files.set('/ws/new-name.http', '');
+    vfs.files.set('/ws/aaa.http', '');
+    vfs.meta.set('/ws/new-name.http', { modifiedAt: 1000 });
+    vfs.meta.set('/ws/aaa.http', { modifiedAt: 2000 });
+    const wrapper = mount(WorkspaceSidebar);
+    await flushPromises();
+    await expandDefaultRoot(wrapper);
+    expect(renderedNames(wrapper)).toEqual(['new-name.http', 'aaa.http']);
+
+    await wrapper.find('.sort-select').setValue('modified');
+    await flushPromises();
+
+    expect(renderedNames(wrapper)).toEqual(['aaa.http', 'new-name.http']);
+  });
+
+  it('sorts by created time when that field is selected', async () => {
+    vfs.files.set('/ws/new-name.http', '');
+    vfs.files.set('/ws/aaa.http', '');
+    vfs.meta.set('/ws/new-name.http', { createdAt: 3000, modifiedAt: 1000 });
+    vfs.meta.set('/ws/aaa.http', { createdAt: 1000, modifiedAt: 3000 });
+    const wrapper = mount(WorkspaceSidebar);
+    await flushPromises();
+    await expandDefaultRoot(wrapper);
+
+    await wrapper.find('.sort-select').setValue('created');
+    await flushPromises();
+
+    expect(renderedNames(wrapper)).toEqual(['new-name.http', 'aaa.http']);
+  });
+
+  it('remembers the sort preference across remounts', async () => {
+    vfs.files.set('/ws/a.http', '');
+    const first = mount(WorkspaceSidebar);
+    await flushPromises();
+    await first.find('.sort-order-btn').trigger('click');
+
+    const second = mount(WorkspaceSidebar);
+    await flushPromises();
+    expect(second.find('.sort-order-btn').text()).toBe('↑');
   });
 });

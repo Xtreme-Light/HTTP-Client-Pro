@@ -2,6 +2,14 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useWorkspaceStore, type FileEntry } from '../stores/workspace';
 import { getFs } from '../lib/backend/fs';
+import {
+  FILE_SORT_FIELDS,
+  loadFileSort,
+  saveFileSort,
+  sortFileEntries,
+  type FileSortField,
+  type FileSortOrder,
+} from '../lib/fileSort';
 import FileTreeNode from './FileTreeNode.vue';
 
 const workspaceStore = useWorkspaceStore();
@@ -17,6 +25,10 @@ const blankMenu = ref<{ x: number; y: number; rootPath: string | null } | null>(
 const treeEl = ref<HTMLElement>();
 /** 目录内容缓存 */
 const dirCache = ref<Map<string, FileEntry[]>>(new Map());
+/** 文件排序方式（默认名称降序），持久化到 localStorage */
+const initialSort = loadFileSort();
+const sortField = ref<FileSortField>(initialSort.field);
+const sortOrder = ref<FileSortOrder>(initialSort.order);
 /** 新建文件对话框 */
 const showNewFile = ref(false);
 const newFileParent = ref('');
@@ -31,6 +43,26 @@ const renameOldPath = ref('');
 const renameNewName = ref('');
 
 const roots = computed(() => workspaceStore.roots);
+
+/** 应用当前排序方式后的目录缓存 — 渲染树时统一走这份数据 */
+const sortedDirCache = computed(() => {
+  const sort = { field: sortField.value, order: sortOrder.value };
+  const out = new Map<string, FileEntry[]>();
+  for (const [path, items] of dirCache.value) {
+    out.set(path, sortFileEntries(items, sort));
+  }
+  return out;
+});
+
+function toggleSortOrder() {
+  sortOrder.value = sortOrder.value === 'desc' ? 'asc' : 'desc';
+}
+
+const sortOrderTitle = computed(() => (sortOrder.value === 'desc' ? '降序（点击切换为升序）' : '升序（点击切换为降序）'));
+
+watch([sortField, sortOrder], () => {
+  saveFileSort({ field: sortField.value, order: sortOrder.value });
+});
 
 async function loadDir(path: string): Promise<FileEntry[]> {
   if (!fs) return [];
@@ -251,7 +283,7 @@ function removeRoot(id: string) {
 }
 
 function getDirEntries(path: string): FileEntry[] {
-  return dirCache.value.get(path) ?? [];
+  return sortedDirCache.value.get(path) ?? [];
 }
 
 onMounted(async () => {
@@ -279,6 +311,16 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
       <button class="icon-btn" title="Import directory" @click="importDirectory">+</button>
     </div>
 
+    <div class="sidebar-sort">
+      <label class="sort-label" for="file-sort-field">排序</label>
+      <select id="file-sort-field" v-model="sortField" class="sort-select" title="文件排序方式">
+        <option v-for="f in FILE_SORT_FIELDS" :key="f.id" :value="f.id">{{ f.label }}</option>
+      </select>
+      <button class="icon-btn sort-order-btn" :title="sortOrderTitle" @click="toggleSortOrder">
+        {{ sortOrder === 'desc' ? '↓' : '↑' }}
+      </button>
+    </div>
+
     <div ref="treeEl" class="tree-container">
       <div v-for="root in roots" :key="root.id" class="root-item" :data-root-path="root.path">
         <div
@@ -300,7 +342,7 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
             :key="entry.path"
             :entry="entry"
             :expanded-dirs="expandedDirs"
-            :dir-cache="dirCache"
+            :dir-cache="sortedDirCache"
             @toggle-dir="toggleDir"
             @file-click="onFileClick"
             @context-menu="onEntryContextMenu"
@@ -420,6 +462,41 @@ watch(() => workspaceStore.fsRevision, () => { void refreshTree(); });
 .icon-btn:hover {
   background: var(--bg-button-hover);
   color: var(--fg-strong);
+}
+
+.sidebar-sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sort-label {
+  font-size: calc(11px * var(--font-scale, 1));
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+.sort-select {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg-button);
+  color: var(--fg-secondary);
+  font-size: calc(11px * var(--font-scale, 1));
+  cursor: pointer;
+}
+
+.sort-select:hover {
+  background: var(--bg-button-hover);
+  color: var(--fg-strong);
+}
+
+.sort-order-btn {
+  flex-shrink: 0;
 }
 
 .tree-container {

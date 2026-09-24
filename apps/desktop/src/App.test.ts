@@ -60,7 +60,8 @@ vi.mock('@tauri-apps/api/window', () => ({
 vi.mock('./composables/useRunCurrent', () => ({
   detectAdapter: () => ({}),
   setBackendAdapter: () => { /* noop */ },
-  useRunCurrent: () => ({ run: async () => { /* noop */ } }),
+  setParallelConfirmHandler: () => { /* noop */ },
+  useRunCurrent: () => ({ run: async () => { /* noop */ }, rerun: async () => { /* noop */ } }),
 }));
 
 vi.mock('./lib/backend', () => ({ detectAdapter: () => ({}) }));
@@ -74,7 +75,7 @@ const STUBS = {
   EditorTabBar: true,
   SettingsPane: true,
   ResponsePane: true,
-  HistoryPanel: true,
+  RequestPanel: true,
   Splitpanes: { template: '<div><slot /></div>' },
   Pane: { template: '<div><slot /></div>' },
 };
